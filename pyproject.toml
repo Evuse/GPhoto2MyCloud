@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gphoto2mycloud"
+version = "1.0.0"
+description = "Lossless Google Takeout ingestion for a local My Cloud NAS"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "GPhoto2MyCloud contributors"}]
+
+[project.scripts]
+gphoto2mycloud = "gphoto2mycloud.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

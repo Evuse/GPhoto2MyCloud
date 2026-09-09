@@ -38,6 +38,29 @@ async function ensureDebugger(tabId) {
   return target;
 }
 
+async function configureDirectDownload(target, downloadPath) {
+  // chrome.debugger exposes the Page domain on tab targets. The Browser-domain
+  // variant exists in full CDP clients but is not available through this API on
+  // affected Chrome builds (it returns JSON-RPC -32601).
+  try {
+    await chrome.debugger.sendCommand(target, "Page.setDownloadBehavior", {
+      behavior: "allow", downloadPath
+    });
+    return "Page.setDownloadBehavior";
+  } catch (pageError) {
+    try {
+      await chrome.debugger.sendCommand(target, "Browser.setDownloadBehavior", {
+        behavior: "allow", downloadPath, eventsEnabled: true
+      });
+      return "Browser.setDownloadBehavior";
+    } catch (browserError) {
+      throw new Error(
+        `Chrome non consente il download diretto sul NAS: Page=${pageError.message}; Browser=${browserError.message}`
+      );
+    }
+  }
+}
+
 async function dispatchShiftD(tabId) {
   const target = await ensureDebugger(tabId);
     await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
@@ -143,8 +166,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       if (existing) throw new Error("Lotto già attivo");
       const prepared = await nativeMessage({command: "prepare", destination: message.settings.destination});
       const target = await ensureDebugger(tabId);
-      await chrome.debugger.sendCommand(target, "Browser.setDownloadBehavior", {behavior: "allow", downloadPath: prepared.downloadPath, eventsEnabled: true});
-      await setJob({tabId, settings: message.settings, photoIds: message.photoIds, downloadPath: prepared.downloadPath, downloadId: null, startedAt: Date.now() - 1000});
+      const downloadCommand = await configureDirectDownload(target, prepared.downloadPath);
+      chrome.runtime.sendMessage({type:"progress-ui",phase:"requesting-download",phaseLabel:"Download diretto configurato",message:"Chrome scriverà lo ZIP direttamente sul My Cloud",processPercent:28,batchPercent:100,batchLabel:"Destinazione pronta",detail:`${downloadCommand} → ${prepared.downloadPath}`}).catch(()=>{});
+      await setJob({tabId, settings: message.settings, photoIds: message.photoIds, downloadPath: prepared.downloadPath, downloadCommand, downloadId: null, startedAt: Date.now() - 1000});
       await dispatchShiftD(tabId);
       respond({ok: true});
     }).catch(async error => {

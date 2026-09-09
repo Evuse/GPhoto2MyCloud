@@ -64,7 +64,7 @@ L'installer crea anche `~/Applications/GPhoto2MyCloud.app`. Per le esecuzioni fu
 avviare questa app: riapre Chrome con le opzioni necessarie a impedire la sospensione
 della timeline quando si lavora in un'altra scheda o applicazione.
 
-> La release finale mostra **v3.1.0** e **FINAL-PROD-3.1-DIRECT-NAS**. L'installer non si limita più
+> La release corretta mostra **v3.1.1** e **FINAL-PROD-3.1.1-PAGE-CDP**. L'installer non si limita più
 > a copiare il Native Host: installa l'intera estensione sotto
 > `~/Library/Application Support/GPhoto2MyCloud/extension-production`, aggiorna il
 > riferimento del profilo Chrome e riavvia Chrome con quella directory. Se compaiono
@@ -92,9 +92,10 @@ aggiuntivo o configurazioni Google Cloud.
    checkbox e usa click singoli solo come fallback o in presenza di elementi già fatti.
 3. Il service worker usa il protocollo Chrome DevTools per generare un evento ⇧D
    attendibile; Chrome mostra l'avviso standard mentre il debugger è collegato.
-4. Prima di ⇧D crea `.gphoto2mycloud-incoming` sul NAS e usa
-   `Browser.setDownloadBehavior` per far scrivere a Chrome il download direttamente
-   lì. Lo ZIP non viene prima salvato sul disco interno del Mac.
+4. Prima di ⇧D crea `.gphoto2mycloud-incoming` sul NAS e usa innanzitutto
+   `Page.setDownloadBehavior`, il comando disponibile per un tab collegato tramite
+   `chrome.debugger`. Solo su browser che lo richiedono prova la variante `Browser`.
+   Lo ZIP viene scritto direttamente sul NAS e non sul disco interno del Mac.
 5. L'app aspetta che `chrome.downloads` dichiari il file completo.
 6. Il servizio nativo accetta sorgenti soltanto dall'area incoming del My Cloud e
    destinazioni solo sotto `/Volumes`.

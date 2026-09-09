@@ -5,6 +5,7 @@
     const input = value || {};
     return {
       destination: String(input.destination || "/Volumes/MyCloud/GooglePhotos"),
+      downloadRoot: String(input.downloadRoot || "~/Downloads"),
       extractedFolder: String(input.extractedFolder || "Media"),
       keepArchives: input.keepArchives === true,
       rangeSelection: input.rangeSelection !== false,

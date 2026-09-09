@@ -116,18 +116,17 @@ def handle(message: dict) -> dict:
     if message.get("command") == "status":
         free = shutil.disk_usage(destination).free
         return {"ok": True, "freeBytes": free, "freeHuman": f"{free / 1024**3:.1f} GB"}
-    incoming = destination / ".gphoto2mycloud-incoming"
     if message.get("command") == "prepare":
-        incoming.mkdir(parents=True, exist_ok=True)
-        if not os.access(incoming, os.W_OK):
-            raise PermissionError(f"Cartella temporanea non scrivibile: {incoming}")
-        return {"ok": True, "downloadPath": str(incoming)}
+        downloads = Path(str(message.get("downloadRoot", "~/Downloads"))).expanduser().resolve()
+        if not downloads.is_dir() or not os.access(downloads, os.W_OK):
+            raise ValueError(f"Cartella Download locale non disponibile o non scrivibile: {downloads}")
+        return {"ok": True, "downloadPath": str(downloads)}
     if message.get("command") != "move":
         raise ValueError("Comando sconosciuto")
     source = Path(str(message.get("source", ""))).resolve()
-    incoming = incoming.resolve()
-    if not source.is_file() or (incoming not in source.parents and source.parent != incoming):
-        raise ValueError(f"Chrome non ha scritto il file direttamente sul My Cloud: {source}")
+    downloads = Path(str(message.get("downloadRoot", "~/Downloads"))).expanduser().resolve()
+    if not source.is_file() or (downloads not in source.parents and source.parent != downloads):
+        raise ValueError(f"Il file completato da Chrome non si trova sotto {downloads}: {source}")
     folder = safe_relative(str(message.get("extractedFolder", "Media")))
     media = destination / folder
     media.mkdir(parents=True, exist_ok=True)

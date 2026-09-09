@@ -38,29 +38,6 @@ async function ensureDebugger(tabId) {
   return target;
 }
 
-async function configureDirectDownload(target, downloadPath) {
-  // chrome.debugger exposes the Page domain on tab targets. The Browser-domain
-  // variant exists in full CDP clients but is not available through this API on
-  // affected Chrome builds (it returns JSON-RPC -32601).
-  try {
-    await chrome.debugger.sendCommand(target, "Page.setDownloadBehavior", {
-      behavior: "allow", downloadPath
-    });
-    return "Page.setDownloadBehavior";
-  } catch (pageError) {
-    try {
-      await chrome.debugger.sendCommand(target, "Browser.setDownloadBehavior", {
-        behavior: "allow", downloadPath, eventsEnabled: true
-      });
-      return "Browser.setDownloadBehavior";
-    } catch (browserError) {
-      throw new Error(
-        `Chrome non consente il download diretto sul NAS: Page=${pageError.message}; Browser=${browserError.message}`
-      );
-    }
-  }
-}
-
 async function dispatchShiftD(tabId) {
   const target = await ensureDebugger(tabId);
     await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
@@ -110,6 +87,7 @@ chrome.downloads.onChanged.addListener(async delta => {
       chrome.runtime.sendMessage({type:"progress-ui",phase:"extracting",phaseLabel:"Estrazione sul My Cloud",message:"Download completo, estrazione e verifica in corso",processPercent:72,batchPercent:0,batchLabel:"Estrazione file",detail:item.filename.split("/").pop()}).catch(()=>{});
       const moved = await nativeMessage({
         command: "move", source: item.filename, destination: job.settings.destination,
+        downloadRoot: job.settings.downloadRoot,
         extractedFolder: job.settings.extractedFolder,
         keepArchives: job.settings.keepArchives,
         photoIds: job.photoIds,
@@ -148,8 +126,17 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!sender.tab?.id) { respond({ok: false, error: "Scheda non disponibile"}); return; }
     ensureDebugger(sender.tab.id).then(async target => {
       const modifiers = message.shift ? 8 : 0;
-      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {type: "mousePressed", x: message.x, y: message.y, button: "left", clickCount: 1, modifiers});
-      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {type: "mouseReleased", x: message.x, y: message.y, button: "left", clickCount: 1, modifiers});
+      if (message.shift) {
+        await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {type:"rawKeyDown",key:"Shift",code:"ShiftLeft",modifiers:8,windowsVirtualKeyCode:16});
+      }
+      try {
+        await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {type: "mousePressed", x: message.x, y: message.y, button: "left", clickCount: 1, modifiers});
+        await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {type: "mouseReleased", x: message.x, y: message.y, button: "left", clickCount: 1, modifiers});
+      } finally {
+        if (message.shift) {
+          await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {type:"keyUp",key:"Shift",code:"ShiftLeft",windowsVirtualKeyCode:16});
+        }
+      }
       respond({ok: true});
     }, error => respond({ok: false, error: error.message}));
     return true;
@@ -164,11 +151,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!tabId) { respond({ok: false, error: "Scheda Google Foto non disponibile"}); return; }
     getJob().then(async existing => {
       if (existing) throw new Error("Lotto già attivo");
-      const prepared = await nativeMessage({command: "prepare", destination: message.settings.destination});
-      const target = await ensureDebugger(tabId);
-      const downloadCommand = await configureDirectDownload(target, prepared.downloadPath);
-      chrome.runtime.sendMessage({type:"progress-ui",phase:"requesting-download",phaseLabel:"Download diretto configurato",message:"Chrome scriverà lo ZIP direttamente sul My Cloud",processPercent:28,batchPercent:100,batchLabel:"Destinazione pronta",detail:`${downloadCommand} → ${prepared.downloadPath}`}).catch(()=>{});
-      await setJob({tabId, settings: message.settings, photoIds: message.photoIds, downloadPath: prepared.downloadPath, downloadCommand, downloadId: null, startedAt: Date.now() - 1000});
+      const prepared = await nativeMessage({command: "prepare", destination: message.settings.destination, downloadRoot: message.settings.downloadRoot});
+      chrome.runtime.sendMessage({type:"progress-ui",phase:"requesting-download",phaseLabel:"Download locale pronto",message:"Chrome salverà temporaneamente lo ZIP sul Mac",processPercent:28,batchPercent:100,batchLabel:"Destinazione pronta",detail:`Cartella attesa: ${prepared.downloadPath}`}).catch(()=>{});
+      await setJob({tabId, settings: message.settings, photoIds: message.photoIds, downloadPath: prepared.downloadPath, downloadId: null, startedAt: Date.now() - 1000});
       await dispatchShiftD(tabId);
       respond({ok: true});
     }).catch(async error => {

@@ -1,9 +1,9 @@
 # GPhoto2MyCloud per macOS
 
 Applicazione grafica per pilotare **la sessione Google Foto già aperta in Chrome**:
-seleziona le foto in lotti lungo l'intera timeline, invia a Chrome il vero comando
-**⇧D** e configura Chrome perché scriva lo ZIP direttamente sul volume My Cloud;
-l'archivio viene poi estratto nella cartella `Media` sullo stesso volume.
+seleziona le foto in lotti lungo l'intera timeline e invia a Chrome il vero comando
+**⇧D**. Chrome salva temporaneamente lo ZIP nella sua cartella Download locale;
+l'app lo estrae nella cartella `Media` sul My Cloud e infine elimina lo ZIP locale.
 
 ![Architettura](https://img.shields.io/badge/macOS-Chrome%20Extension%20%2B%20Native%20Host-4285F4)
 
@@ -32,7 +32,7 @@ Il pannello laterale di Chrome è la GUI macOS dell'app e mostra:
 
 - fase corrente, messaggio e contatore della selezione;
 - due barre grafiche separate per la fase del processo e il lotto/download corrente;
-- percorso del volume SMB, area temporanea diretta sul NAS e spazio disponibile;
+- percorso del volume SMB, cartella Download locale e spazio disponibile;
 - nome della cartella unica che raccoglie tutti i file estratti;
 - dimensione dei lotti, ritardo tra click e attesa di caricamento della griglia;
 - attivazione/disattivazione della verifica SHA-256;
@@ -64,7 +64,7 @@ L'installer crea anche `~/Applications/GPhoto2MyCloud.app`. Per le esecuzioni fu
 avviare questa app: riapre Chrome con le opzioni necessarie a impedire la sospensione
 della timeline quando si lavora in un'altra scheda o applicazione.
 
-> La release corretta mostra **v3.1.1** e **FINAL-PROD-3.1.1-PAGE-CDP**. L'installer non si limita più
+> La release corretta mostra **v3.2.0** e **FINAL-PROD-3.2-LOCAL-ZIP**. L'installer non si limita più
 > a copiare il Native Host: installa l'intera estensione sotto
 > `~/Library/Application Support/GPhoto2MyCloud/extension-production`, aggiorna il
 > riferimento del profilo Chrome e riavvia Chrome con quella directory. Se compaiono
@@ -88,17 +88,18 @@ aggiuntivo o configurazioni Google Cloud.
 1. Il content script estrae l'identificativo stabile dal link `/photo/<id>`, deduplica
    gli ID e considera esclusivamente checkbox appartenenti alle relative tessere.
 2. Se la modalità rapida è attiva, clicca il primo elemento visibile e usa un vero
-   **Maiusc+click** sull'ultimo: Google Foto seleziona l'intervallo. Verifica ogni
-   checkbox e usa click singoli solo come fallback o in presenza di elementi già fatti.
+   **Maiusc+click** sull'ultimo: invia `Shift keyDown`, mantiene il modificatore anche
+   negli eventi mouse e invia `Shift keyUp` soltanto dopo il click. Google Foto può
+   così creare l'intervallo; ogni checkbox viene verificata e i click singoli restano
+   il fallback per elementi non selezionati o già elaborati.
 3. Il service worker usa il protocollo Chrome DevTools per generare un evento ⇧D
    attendibile; Chrome mostra l'avviso standard mentre il debugger è collegato.
-4. Prima di ⇧D crea `.gphoto2mycloud-incoming` sul NAS e usa innanzitutto
-   `Page.setDownloadBehavior`, il comando disponibile per un tab collegato tramite
-   `chrome.debugger`. Solo su browser che lo richiedono prova la variante `Browser`.
-   Lo ZIP viene scritto direttamente sul NAS e non sul disco interno del Mac.
+4. Chrome salva lo ZIP nella propria cartella Download. L'app non usa più i comandi
+   CDP `Page/Browser.setDownloadBehavior`, incompatibili con `chrome.debugger` nelle
+   versioni che restituiscono gli errori `-32000` e `-32601`.
 5. L'app aspetta che `chrome.downloads` dichiari il file completo.
-6. Il servizio nativo accetta sorgenti soltanto dall'area incoming del My Cloud e
-   destinazioni solo sotto `/Volumes`.
+6. Il servizio nativo accetta il file soltanto dalla cartella locale configurata e
+   accetta destinazioni NAS solo sotto `/Volumes`.
 7. Estrae lo ZIP in una directory temporanea direttamente sul My Cloud, blocca path
    traversal e symlink, forza il flush e verifica SHA-256 di ogni file estratto.
 8. Pubblica tutti i file sotto l'unica cartella configurata (`Media` di default). I
@@ -111,9 +112,8 @@ aggiuntivo o configurazioni Google Cloud.
 11. Se lo ZIP contiene meno file degli elementi selezionati, il lotto viene rifiutato
     e non viene marcato completato (più file sono ammessi, ad esempio per Live Photo).
 
-Se il NAS viene disconnesso, l'hash non coincide o Chrome non avvia il download,
-l'operazione si ferma e l'eventuale ZIP resta nell'area incoming del My Cloud; non
-viene creata alcuna copia temporanea nel disco interno del Mac.
+Se il NAS viene disconnesso, l'hash non coincide o l'estrazione fallisce, l'operazione
+si ferma e lo ZIP locale non viene eliminato, così il lotto può essere recuperato.
 
 ## Permessi richiesti
 

@@ -38,13 +38,24 @@ def safe_relative(name: str) -> Path:
     return relative
 
 
-def publish_file(source: Path, target: Path, verify: bool) -> tuple[Path, str | None]:
+def publish_file(source: Path, target: Path, verify: bool, conflicts: Path | None = None) -> tuple[Path, str | None]:
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         if source.stat().st_size == target.stat().st_size and digest(source) == digest(target):
             source.unlink()
             return target, digest(target) if verify else None
-        target = unique_target(target.parent, target.name)
+        if conflicts is None:
+            raise FileExistsError(f"File omonimo con contenuto diverso: {target}")
+        target = conflicts / target.relative_to(conflicts.parent.parent)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            source_hash = digest(source)
+            if source.stat().st_size == target.stat().st_size and source_hash == digest(target):
+                source.unlink()
+                return target, source_hash if verify else None
+            relative = target.relative_to(conflicts)
+            target = conflicts / source_hash[:16] / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
     checksum = digest(source) if verify else None
     os.replace(source, target)
     if verify and digest(target) != checksum:
@@ -52,7 +63,7 @@ def publish_file(source: Path, target: Path, verify: bool) -> tuple[Path, str | 
     return target, checksum
 
 
-def extract_download(source: Path, media: Path, verify: bool) -> list[dict]:
+def extract_download(source: Path, media: Path, verify: bool, archive_hash: str | None = None) -> list[dict]:
     staging = media.parent / f".gphoto2mycloud-{uuid.uuid4().hex}"
     staging.mkdir(parents=True)
     extracted: list[dict] = []
@@ -79,7 +90,8 @@ def extract_download(source: Path, media: Path, verify: bool) -> list[dict]:
                 os.fsync(writer.fileno())
         for temporary in sorted(path for path in staging.rglob("*") if path.is_file()):
             relative = temporary.relative_to(staging)
-            published, checksum = publish_file(temporary, media / relative, verify)
+            conflicts = media / "_conflitti" / (archive_hash or "archivio-sconosciuto")[:16]
+            published, checksum = publish_file(temporary, media / relative, verify, conflicts)
             extracted.append({"file": str(published.relative_to(media)), "bytes": published.stat().st_size, "sha256": checksum})
         return extracted
     finally:
@@ -114,7 +126,7 @@ def handle(message: dict) -> dict:
     media = destination / folder
     media.mkdir(parents=True, exist_ok=True)
     archive_hash = digest(source)
-    files = extract_download(source, media, bool(message.get("verify", True)))
+    files = extract_download(source, media, bool(message.get("verify", True)), archive_hash)
     photo_ids = list(dict.fromkeys(message.get("photoIds") or []))
     if len(files) < len(photo_ids):
         raise OSError(

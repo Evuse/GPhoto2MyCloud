@@ -38,6 +38,21 @@ class NativeHostTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non sicuro"):
             safe_relative("../../escape.jpg")
 
+    def test_conflicting_content_keeps_the_original_filename(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            media = root / "Media"
+            media.mkdir()
+            (media / "foto.jpg").write_bytes(b"first")
+            archive = root / "second.zip"
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("foto.jpg", b"second")
+            files = extract_download(archive, media, True, "a" * 64)
+            published = media / files[0]["file"]
+            self.assertEqual(published.name, "foto.jpg")
+            self.assertEqual(published.read_bytes(), b"second")
+            self.assertIn("_conflitti", published.parts)
+
 
 if __name__ == "__main__":
     unittest.main()

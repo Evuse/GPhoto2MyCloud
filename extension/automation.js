@@ -81,11 +81,22 @@
         await sleep(settings.clickDelayMs);
         if (item.checkbox.getAttribute("aria-checked") === "true") {
           selected.push(item);
-          report("selecting", `Selezionate ${selected.length}/${settings.batchSize} · ${processed.size} già archiviate`, {selected: selected.length});
+          report("selecting", `Selezionato elemento ${selected.length} del lotto`, {
+            phaseLabel: "Selezione dalla timeline", selected: selected.length,
+            batchPercent: selected.length / settings.batchSize * 100,
+            batchLabel: `Lotto: ${selected.length} / ${settings.batchSize}`,
+            detail: `ID ${item.id} · ${processed.size} già archiviati`
+          });
         }
       }
       if (selected.length >= settings.batchSize) break;
-      bottomChecks = await advanceTimeline(settings) ? 0 : bottomChecks + 1;
+      const advanced = await advanceTimeline(settings);
+      bottomChecks = advanced ? 0 : bottomChecks + 1;
+      report("scrolling", advanced ? "Timeline avanzata: caricamento della sezione successiva" : `Controllo fine timeline ${bottomChecks}/5`, {
+        phaseLabel:"Scansione timeline",selected:selected.length,batchPercent:selected.length/settings.batchSize*100,
+        batchLabel:`Lotto: ${selected.length} / ${settings.batchSize}`,
+        detail:`posizione ${Math.round(scrollPosition(timelineScroller()))} px · ${observed.size} ID individuati`
+      });
     }
     return selected;
   }
@@ -122,22 +133,24 @@
     const settings = GPhotoPlanner.clampSettings(rawSettings);
     rewindTimeline();
     await sleep(settings.settleSeconds * 1000);
-    report("starting", `Scansione dall'inizio · ${processed.size} elementi già completati`);
+    report("starting", "Scansione della timeline dall'inizio", {phaseLabel:"Preparazione",batchPercent:0,batchLabel:"Lotto non ancora iniziato",detail:`Registro: ${processed.size} elementi già completati`});
     try {
       while (!stopped) {
         const batch = await selectBatch(settings);
         if (!batch.length) {
           if (!observed.size) throw new Error("Nessuna tessera riconosciuta: la struttura di Google Foto potrebbe essere cambiata");
-          report("complete", `Scansione completa: ${processed.size} elementi archiviati, ${observed.size} identificativi verificati in questa scansione.`, {selected: 0});
+          report("complete", "Backup della timeline completato", {selected:0,processPercent:100,batchPercent:100,phaseLabel:"Completato",detail:`${processed.size} archiviati · ${observed.size} ID osservati`});
           break;
         }
-        report("requesting-download", `Download di ${batch.length} elementi…`, {selected: batch.length});
+        report("requesting-download", `Richiesta ZIP per ${batch.length} elementi`, {selected:batch.length,batchPercent:100,phaseLabel:"Avvio download",detail:`ID da ${batch[0].id} a ${batch.at(-1).id}`});
         const completion = waitForBatch();
         const response = await chrome.runtime.sendMessage({type: "downloadBatch", count: batch.length, photoIds: batch.map(item => item.id), settings});
         if (!response?.ok) throw new Error(response?.error || "Download non avviato");
         await completion;
         await saveCompleted(batch);
-        report("batch-complete", `Lotto verificato sul My Cloud · totale ${processed.size}`, {selected: batch.length});
+        const moved=completion.moved||{};
+        const examples=(moved.files||[]).slice(0,3).map(file=>file.file).join(", ");
+        report("batch-complete", `Estratti ${moved.fileCount||batch.length} file sul My Cloud`, {selected:batch.length,processPercent:100,batchPercent:100,phaseLabel:"Lotto completato",detail:`${processed.size} elementi registrati · cartella ${moved.extractedFolder||settings.extractedFolder}${examples?` · ${examples}`:""}`});
         await clearSelection();
       }
     } catch (error) {

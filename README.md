@@ -30,12 +30,14 @@ evitare richieste massive che Chrome/Google potrebbero rifiutare.
 Il pannello laterale di Chrome è la GUI macOS dell'app e mostra:
 
 - fase corrente, messaggio e contatore della selezione;
+- due barre grafiche separate per la fase del processo e il lotto/download corrente;
 - percorso del volume SMB, cartella download di Chrome e spazio disponibile;
 - nome della cartella unica che raccoglie tutti i file estratti;
 - dimensione dei lotti, ritardo tra click e attesa di caricamento della griglia;
 - attivazione/disattivazione della verifica SHA-256;
 - comandi **Avvia backup** e **Interrompi**;
-- registro cronologico visibile durante l'intero processo.
+- registro cronologico dettagliato con orario, livello, ID selezionati, posizione di
+  scorrimento, byte scaricati, nomi estratti, destinazione ed eventuali errori;
 - conteggio degli identificativi scoperti e già trasferiti, con ripresa dopo un arresto;
 - comando esplicito per azzerare il registro e iniziare un backup completamente nuovo.
 
@@ -48,13 +50,20 @@ Requisiti: macOS, Google Chrome, Python 3 di sistema o installato e My Cloud gi�
 montato via SMB (ad esempio `/Volumes/MyCloud`).
 
 1. Fare doppio clic su `macos/Installa.command`. macOS può richiedere **Apri** dal
-   menu contestuale la prima volta.
-2. Nella pagina Chrome aperta, abilitare **Modalità sviluppatore**, scegliere
-   **Carica estensione non pacchettizzata** e indicare la cartella `extension/`.
-3. Aprire `https://photos.google.com/` nel profilo Chrome già autenticato.
-4. Premere l'icona GPhoto2MyCloud, impostare ad esempio
+   menu contestuale la prima volta. L'installer chiude Chrome in modo controllato,
+   installa una copia stabile, aggiorna l'eventuale profilo che puntava alla vecchia
+   cartella, verifica versione e hash, quindi riapre Chrome e Google Foto.
+2. Solo se Chrome mostra per la prima volta la richiesta relativa a un'estensione
+   unpacked, confermarne il caricamento. Non occorre scegliere manualmente una cartella.
+3. Premere l'icona GPhoto2MyCloud, impostare ad esempio
    `/Volumes/MyCloud/GooglePhotos` e premere **Verifica disco**.
-5. Premere **Avvia backup** e lasciare la scheda aperta.
+4. Premere **Avvia backup** e lasciare la scheda aperta.
+
+> La release finale mostra **v3.0.0** e **FINAL-PROD-3**. L'installer non si limita più
+> a copiare il Native Host: installa l'intera estensione sotto
+> `~/Library/Application Support/GPhoto2MyCloud/extension-production`, aggiorna il
+> riferimento del profilo Chrome e riavvia Chrome con quella directory. Se compaiono
+> ancora `2.0` o `2.1`, non è stata eseguita questa versione di `Installa.command`.
 
 ### Posso usare il Mac nel frattempo?
 
@@ -81,8 +90,9 @@ OAuth aggiuntivo o configurazioni Google Cloud.
    destinazioni solo sotto `/Volumes`.
 6. Estrae lo ZIP in una directory temporanea direttamente sul My Cloud, blocca path
    traversal e symlink, forza il flush e verifica SHA-256 di ogni file estratto.
-7. Pubblica tutti i file sotto l'unica cartella configurata (`Media` di default). Non
-   sovrascrive: un file identico viene deduplicato, uno omonimo ma diverso rinominato.
+7. Pubblica tutti i file sotto l'unica cartella configurata (`Media` di default). I
+   nomi originali non vengono mai modificati: un file identico viene deduplicato;
+   un omonimo differente conserva il nome ed è separato sotto `_conflitti/<hash>/`.
 8. Registra nome, byte, data e SHA-256 in
    `.gphoto2mycloud-history.jsonl` sul My Cloud.
 9. Soltanto dopo la copia verificata registra gli ID del lotto nel profilo Chrome;
@@ -116,8 +126,9 @@ python3 -m py_compile native-host/gphoto2mycloud_host.py
 
 ### Limiti noti
 
-- La prima installazione richiede il caricamento esplicito dell'estensione; per
-  eliminarlo occorre pubblicare e firmare l'estensione sul Chrome Web Store.
+- Chrome può mostrare una conferma di sicurezza al primissimo caricamento di
+  un'estensione non pubblicata; gli aggiornamenti successivi sono gestiti
+  dall'installer nella directory stabile.
 - Il download multiplo prodotto da Google è normalmente uno ZIP: viene estratto sul
   NAS. La conservazione aggiuntiva dello ZIP in `Archives` è opzionale nella GUI.
 - La scansione dipende dalla struttura accessibile della griglia Google Foto. Se

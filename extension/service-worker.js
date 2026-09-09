@@ -71,12 +71,18 @@ chrome.downloads.onChanged.addListener(async delta => {
     }
   }
   if (!job || job.downloadId !== delta.id) return;
+  if (delta.bytesReceived || delta.totalBytes) {
+    const [current] = await chrome.downloads.search({id: delta.id});
+    const percent = current.totalBytes > 0 ? current.bytesReceived / current.totalBytes * 100 : 0;
+    chrome.runtime.sendMessage({type:"progress-ui",phase:"downloading",phaseLabel:"Download da Google Foto",message:current.totalBytes>0?`Scaricati ${(current.bytesReceived/1048576).toFixed(1)} di ${(current.totalBytes/1048576).toFixed(1)} MB`:`Scaricati ${(current.bytesReceived/1048576).toFixed(1)} MB`,processPercent:30+percent*.35,batchPercent:percent,batchLabel:"Download ZIP",detail:current.filename.split("/").pop()}).catch(()=>{});
+  }
   if (delta.error) {
     await setJob(null);
     await chrome.tabs.sendMessage(job.tabId, {type: "batchResult", ok: false, error: `Chrome: ${delta.error.current}`}).catch(() => {});
   } else if (delta.state?.current === "complete") {
     try {
       const [item] = await chrome.downloads.search({id: delta.id});
+      chrome.runtime.sendMessage({type:"progress-ui",phase:"extracting",phaseLabel:"Estrazione sul My Cloud",message:"Download completo, estrazione e verifica in corso",processPercent:72,batchPercent:0,batchLabel:"Estrazione file",detail:item.filename.split("/").pop()}).catch(()=>{});
       const moved = await nativeMessage({
         command: "move", source: item.filename, destination: job.settings.destination,
         downloadRoot: job.settings.downloadRoot,

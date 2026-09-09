@@ -1,5 +1,7 @@
 (() => {
   "use strict";
+  if (globalThis.__gphoto2mycloudAutomationLoaded) return;
+  globalThis.__gphoto2mycloudAutomationLoaded = true;
   let running = false;
   let stopped = false;
   let selected = [];
@@ -215,6 +217,7 @@
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, respond) => {
+    if (message.type === "pingAutomation") { respond({ok: true, version: chrome.runtime.getManifest().version}); }
     if (message.type === "start") { start(message.settings); respond({ok: true}); }
     if (message.type === "stop") { stopped = true; respond({ok: true}); }
   });

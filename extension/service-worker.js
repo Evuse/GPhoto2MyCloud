@@ -152,7 +152,45 @@ chrome.alarms.onAlarm.addListener(async alarm => {
 async function resumeRequested(tabId) {
   const {syncDesired, settings} = await chrome.storage.local.get(["syncDesired", "settings"]);
   if (!syncDesired || !settings) return;
-  chrome.tabs.sendMessage(tabId, {type:"start", settings}).catch(() => {});
+  try {
+    await ensureAutomationContent(tabId);
+    await chrome.tabs.sendMessage(tabId, {type:"start", settings});
+  } catch (error) {
+    chrome.runtime.sendMessage({type:"progress-ui",phase:"recovering",phaseLabel:"Ripristino content script",message:"La pagina Google Foto non è ancora pronta",processPercent:1,batchPercent:0,detail:error.message}).catch(()=>{});
+  }
+}
+
+const contentInjectionInFlight = new Map();
+
+async function ensureAutomationContent(tabId) {
+  if (contentInjectionInFlight.has(tabId)) return contentInjectionInFlight.get(tabId);
+  const operation = (async () => {
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await ensureAutomationContentOnce(tabId);
+      } catch (error) {
+        lastError = error;
+        await new Promise(resolve => setTimeout(resolve, attempt * 500));
+      }
+    }
+    throw lastError;
+  })().finally(() => contentInjectionInFlight.delete(tabId));
+  contentInjectionInFlight.set(tabId, operation);
+  return operation;
+}
+
+async function ensureAutomationContentOnce(tabId) {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, {type:"pingAutomation"});
+    if (response?.ok) return response;
+  } catch (_error) {
+    // Expected after installing/reloading the extension while Google Photos is open.
+  }
+  await chrome.scripting.executeScript({target:{tabId}, files:["planner.js", "automation.js"]});
+  const response = await chrome.tabs.sendMessage(tabId, {type:"pingAutomation"});
+  if (!response?.ok) throw new Error("Content script caricato ma non raggiungibile");
+  return response;
 }
 
 chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
@@ -171,6 +209,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   }
   if (message.type === "hostStatus") {
     nativeMessage({command: "status", destination: message.destination}).then(respond, error => respond({ok: false, error: error.message}));
+    return true;
+  }
+  if (message.type === "ensureAutomationContent") {
+    ensureAutomationContent(message.tabId).then(respond, error => respond({ok:false,error:error.message}));
     return true;
   }
   if (message.type === "prepareAutomation") {

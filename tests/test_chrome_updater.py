@@ -12,7 +12,7 @@ class ChromeUpdaterTests(unittest.TestCase):
             root = Path(raw)
             source = root / "source"
             source.mkdir()
-            (source / "manifest.json").write_text('{"version":"3.4.0"}')
+            (source / "manifest.json").write_text('{"version":"3.4.1"}')
             (source / "sidepanel.html").write_text("production")
             chrome = root / "Chrome"
             profile = chrome / "Default"
@@ -28,7 +28,7 @@ class ChromeUpdaterTests(unittest.TestCase):
             result = json.loads((profile / "Preferences").read_text())
             setting = result["extensions"]["settings"][EXTENSION_ID]
             self.assertEqual(setting["path"], str(destination))
-            self.assertEqual(setting["manifest"]["version"], "3.4.0")
+            self.assertEqual(setting["manifest"]["version"], "3.4.1")
 
 
 if __name__ == "__main__":

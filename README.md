@@ -66,7 +66,7 @@ L'installer crea anche `~/Applications/GPhoto2MyCloud.app`. Per le esecuzioni fu
 avviare questa app: riapre Chrome con le opzioni necessarie a impedire la sospensione
 della timeline quando si lavora in un'altra scheda o applicazione.
 
-> La release resiliente mostra **v3.4.0** e **FINAL-PROD-3.4-AUTO-RECOVERY**. L'installer non si limita più
+> La release resiliente mostra **v3.4.1** e **FINAL-PROD-3.4.1-AUTO-INJECT**. L'installer non si limita più
 > a copiare il Native Host: installa l'intera estensione sotto
 > `~/Library/Application Support/GPhoto2MyCloud/extension-production`, aggiorna il
 > riferimento del profilo Chrome e riavvia Chrome con quella directory. Se compaiono
@@ -130,6 +130,12 @@ il numero di minuti configurato, Chrome annulla quel tentativo e l'app lo ripete
 ID sono marcati completati soltanto dopo estrazione e verifica, quindi un errore non fa
 saltare elementi. File già pubblicati da un tentativo parziale vengono riconosciuti
 tramite SHA-256 e non duplicati nel retry.
+
+Prima di inviare `start`, il service worker esegue un ping al content script della
+scheda Google Foto. Se la scheda era già aperta prima dell'installazione o del reload
+e risponde con “Receiving end does not exist”, l'estensione inietta automaticamente
+`planner.js` e `automation.js`, ripete il ping e soltanto dopo avvia il backup. Lo
+stesso controllo viene eseguito nel ripristino dopo reload e riavvio di Chrome.
 
 Se il NAS viene disconnesso, l'hash non coincide o l'estrazione fallisce, il tentativo
 corrente termina ma la sincronizzazione resta attiva e riprova con backoff. Lo ZIP

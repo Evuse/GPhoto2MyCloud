@@ -70,18 +70,13 @@
     return [...result.values()];
   }
 
-  function visibleProcessedItems() {
-    return [...document.querySelectorAll('a[href*="/photo/"]')]
-      .some(link => processed.has(GPhotoPlanner.photoId(link.href, location.href)));
-  }
-
-  async function trustedClick(checkbox, shift) {
+  async function trustedClick(checkbox) {
     const box = checkbox.getBoundingClientRect();
     const response = await chrome.runtime.sendMessage({
-      type: "trustedClick", x: box.left + box.width / 2, y: box.top + box.height / 2, shift
+      type: "trustedClick", x: box.left + box.width / 2, y: box.top + box.height / 2
     });
     if (!response?.ok) throw new Error(response?.error || "Click Chrome non riuscito");
-    await sleep(shift ? Math.max(500, settingsForClickDelay) : settingsForClickDelay);
+    await sleep(settingsForClickDelay);
   }
 
   let settingsForClickDelay = 350;
@@ -92,23 +87,17 @@
     let bottomChecks = 0;
     while (!stopped && selected.length < settings.batchSize && bottomChecks < 5) {
       const candidates = visiblePhotoCheckboxes().filter(item => !selected.some(value => value.id === item.id));
-      const room = settings.batchSize - selected.length;
-      const pageItems = candidates.slice(0, room);
-      const fastRange = settings.rangeSelection && pageItems.length > 1 && !visibleProcessedItems();
-      if (fastRange) {
-        if (!selected.length) await trustedClick(pageItems[0].checkbox, false);
-        await trustedClick(pageItems.at(-1).checkbox, true);
-      }
+      const pageItems = candidates.slice(0, settings.batchSize - selected.length);
       for (const item of pageItems) {
         if (selected.length >= settings.batchSize || stopped) break;
-        if (item.checkbox.getAttribute("aria-checked") !== "true") await trustedClick(item.checkbox, false);
+        if (item.checkbox.getAttribute("aria-checked") !== "true") await trustedClick(item.checkbox);
         if (item.checkbox.getAttribute("aria-checked") === "true") {
           selected.push(item);
           report("selecting", `Selezionato elemento ${selected.length} del lotto`, {
             phaseLabel: "Selezione dalla timeline", selected: selected.length,
             batchPercent: selected.length / settings.batchSize * 100,
             batchLabel: `Lotto: ${selected.length} / ${settings.batchSize}`,
-            detail: `ID ${item.id} · ${processed.size} già archiviati · ${fastRange?"Maiusc+click":"click singolo"}`
+            detail: `ID ${item.id} · ${processed.size} già archiviati · selezione verificata`
           });
         }
       }
@@ -154,36 +143,74 @@
     observed = new Set();
     processed = new Set((await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || []);
     const settings = GPhotoPlanner.clampSettings(rawSettings);
+    let restartAfterUnexpectedError = false;
     try {
-      const prepared = await chrome.runtime.sendMessage({type:"prepareAutomation"});
-      if (!prepared?.ok) throw new Error(prepared?.error || "Impossibile mantenere attiva la scheda Google Foto");
+      let preparationFailures = 0;
+      while (!stopped) {
+        const prepared = await chrome.runtime.sendMessage({type:"prepareAutomation"}).catch(error => ({ok:false,error:error.message}));
+        if (prepared?.ok) break;
+        preparationFailures += 1;
+        const delay = Math.min(300, settings.retryDelaySeconds * (2 ** Math.min(5, preparationFailures - 1)));
+        report("recovering", "Preparazione non riuscita: nuovo tentativo automatico", {level:"error",phaseLabel:"Connessione a Chrome",processPercent:1,batchPercent:0,detail:`${prepared?.error || "errore sconosciuto"} · retry tra ${delay}s`});
+        await sleep(delay * 1000);
+      }
+      if (stopped) return;
       rewindTimeline();
       await sleep(settings.settleSeconds * 1000);
       report("starting", "Scansione della timeline dall'inizio", {phaseLabel:"Preparazione",batchPercent:0,batchLabel:"Lotto non ancora iniziato",detail:`Registro: ${processed.size} elementi già completati · modalità focus in background attiva`});
+      let effectiveBatchSize = settings.batchSize;
+      let consecutiveFailures = 0;
       while (!stopped) {
-        const batch = await selectBatch(settings);
-        if (!batch.length) {
-          if (!observed.size) throw new Error("Nessuna tessera riconosciuta: la struttura di Google Foto potrebbe essere cambiata");
-          report("complete", "Backup della timeline completato", {selected:0,processPercent:100,batchPercent:100,phaseLabel:"Completato",detail:`${processed.size} archiviati · ${observed.size} ID osservati`});
-          break;
+        try {
+          const attemptSettings = {...settings, batchSize: effectiveBatchSize};
+          const batch = await selectBatch(attemptSettings);
+          if (!batch.length) {
+            if (!observed.size) throw new Error("Nessuna tessera riconosciuta: la pagina non è ancora pronta");
+            const unresolved = [...observed].filter(id => !processed.has(id));
+            if (unresolved.length) throw new Error(`${unresolved.length} elementi individuati non sono stati selezionati`);
+            report("complete", "Backup della timeline completato", {selected:0,processPercent:100,batchPercent:100,phaseLabel:"Completato",detail:`${processed.size} archiviati · ${observed.size} ID osservati`});
+            break;
+          }
+          report("requesting-download", `Richiesta ZIP per ${batch.length} elementi`, {selected:batch.length,batchPercent:100,phaseLabel:"Avvio download",detail:`Tentativo con lotto ${effectiveBatchSize} · ID da ${batch[0].id} a ${batch.at(-1).id}`});
+          const completion = waitForBatch();
+          const response = await chrome.runtime.sendMessage({type: "downloadBatch", count: batch.length, photoIds: batch.map(item => item.id), settings});
+          if (!response?.ok) throw new Error(response?.error || "Download non avviato");
+          await completion;
+          await saveCompleted(batch);
+          const moved=completion.moved||{};
+          const examples=(moved.files||[]).slice(0,3).map(file=>file.file).join(", ");
+          report("batch-complete", `Estratti ${moved.fileCount||batch.length} file sul My Cloud`, {selected:batch.length,processPercent:100,batchPercent:100,phaseLabel:"Lotto completato",detail:`${processed.size} elementi registrati · cartella ${moved.extractedFolder||settings.extractedFolder}${examples?` · ${examples}`:""}`});
+          await clearSelection();
+          consecutiveFailures = 0;
+          effectiveBatchSize = GPhotoPlanner.batchAfterSuccess(effectiveBatchSize, settings.batchSize);
+        } catch (error) {
+          if (stopped) break;
+          consecutiveFailures += 1;
+          const retry = GPhotoPlanner.retryAfterFailure(effectiveBatchSize, consecutiveFailures, settings.retryDelaySeconds);
+          effectiveBatchSize = retry.batchSize;
+          const delay = retry.delaySeconds;
+          report("recovering", "Errore recuperabile: sincronizzazione non interrotta", {
+            level:"error", phaseLabel:"Ripristino automatico", processPercent:3, batchPercent:0,
+            batchLabel:`Nuovo lotto: ${effectiveBatchSize}`, detail:`${error.message || error} · nuovo tentativo tra ${delay}s`
+          });
+          await clearSelection();
+          rewindTimeline();
+          observed = new Set();
+          await sleep(delay * 1000);
         }
-        report("requesting-download", `Richiesta ZIP per ${batch.length} elementi`, {selected:batch.length,batchPercent:100,phaseLabel:"Avvio download",detail:`ID da ${batch[0].id} a ${batch.at(-1).id}`});
-        const completion = waitForBatch();
-        const response = await chrome.runtime.sendMessage({type: "downloadBatch", count: batch.length, photoIds: batch.map(item => item.id), settings});
-        if (!response?.ok) throw new Error(response?.error || "Download non avviato");
-        await completion;
-        await saveCompleted(batch);
-        const moved=completion.moved||{};
-        const examples=(moved.files||[]).slice(0,3).map(file=>file.file).join(", ");
-        report("batch-complete", `Estratti ${moved.fileCount||batch.length} file sul My Cloud`, {selected:batch.length,processPercent:100,batchPercent:100,phaseLabel:"Lotto completato",detail:`${processed.size} elementi registrati · cartella ${moved.extractedFolder||settings.extractedFolder}${examples?` · ${examples}`:""}`});
-        await clearSelection();
       }
     } catch (error) {
-      report("error", error.message || String(error));
-      await clearSelection();
+      if (!stopped) {
+        restartAfterUnexpectedError = true;
+        report("recovering", "Errore imprevisto: riavvio automatico richiesto", {level:"error",phaseLabel:"Ripristino",detail:`${error.message || error} · retry tra ${settings.retryDelaySeconds}s`});
+      }
     } finally {
       running = false;
       await chrome.runtime.sendMessage({type:"releaseAutomation"}).catch(()=>{});
+      if (restartAfterUnexpectedError && !stopped) {
+        await sleep(settings.retryDelaySeconds * 1000);
+        if (!stopped) start(rawSettings);
+      }
     }
   }
 

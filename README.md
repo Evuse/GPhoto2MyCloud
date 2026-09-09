@@ -36,11 +36,13 @@ Il pannello laterale di Chrome è la GUI macOS dell'app e mostra:
 - nome della cartella unica che raccoglie tutti i file estratti;
 - dimensione dei lotti, ritardo tra click e attesa di caricamento della griglia;
 - attivazione/disattivazione della verifica SHA-256;
+- avanzamento reale file-per-file durante estrazione e pubblicazione sul NAS;
 - comandi **Avvia backup** e **Interrompi**;
 - registro cronologico dettagliato con orario, livello, ID selezionati, posizione di
   scorrimento, byte scaricati, nomi estratti, destinazione ed eventuali errori;
 - conteggio degli identificativi scoperti e già trasferiti, con ripresa dopo un arresto;
 - comando esplicito per azzerare il registro e iniziare un backup completamente nuovo.
+- retry automatico con backoff, riduzione adattiva dei lotti e watchdog dei download;
 
 Le preferenze restano nel profilo Chrome locale. Il pannello non chiede password e
 non copia cookie: opera esclusivamente nella scheda `photos.google.com` già aperta.
@@ -64,7 +66,7 @@ L'installer crea anche `~/Applications/GPhoto2MyCloud.app`. Per le esecuzioni fu
 avviare questa app: riapre Chrome con le opzioni necessarie a impedire la sospensione
 della timeline quando si lavora in un'altra scheda o applicazione.
 
-> La release corretta mostra **v3.2.0** e **FINAL-PROD-3.2-LOCAL-ZIP**. L'installer non si limita più
+> La release resiliente mostra **v3.4.0** e **FINAL-PROD-3.4-AUTO-RECOVERY**. L'installer non si limita più
 > a copiare il Native Host: installa l'intera estensione sotto
 > `~/Library/Application Support/GPhoto2MyCloud/extension-production`, aggiorna il
 > riferimento del profilo Chrome e riavvia Chrome con quella directory. Se compaiono
@@ -87,11 +89,9 @@ aggiuntivo o configurazioni Google Cloud.
 
 1. Il content script estrae l'identificativo stabile dal link `/photo/<id>`, deduplica
    gli ID e considera esclusivamente checkbox appartenenti alle relative tessere.
-2. Se la modalità rapida è attiva, clicca il primo elemento visibile e usa un vero
-   **Maiusc+click** sull'ultimo: invia `Shift keyDown`, mantiene il modificatore anche
-   negli eventi mouse e invia `Shift keyUp` soltanto dopo il click. Google Foto può
-   così creare l'intervallo; ogni checkbox viene verificata e i click singoli restano
-   il fallback per elementi non selezionati o già elaborati.
+2. Seleziona ogni elemento con un click attendibile e ne controlla subito lo stato.
+   La modalità Maiusc+click è stata rimossa: Google Foto non applica in modo affidabile
+   la selezione a intervallo agli eventi automatizzati, anche simulando lo stato Shift.
 3. Il service worker usa il protocollo Chrome DevTools per generare un evento ⇧D
    attendibile; Chrome mostra l'avviso standard mentre il debugger è collegato.
 4. Chrome salva lo ZIP nella propria cartella Download. L'app non usa più i comandi
@@ -101,7 +101,9 @@ aggiuntivo o configurazioni Google Cloud.
 6. Il servizio nativo accetta il file soltanto dalla cartella locale configurata e
    accetta destinazioni NAS solo sotto `/Volumes`.
 7. Estrae lo ZIP in una directory temporanea direttamente sul My Cloud, blocca path
-   traversal e symlink, forza il flush e verifica SHA-256 di ogni file estratto.
+   traversal e symlink, forza il flush e verifica SHA-256 di ogni file estratto. Il
+   Native Host mantiene un canale persistente e invia alla GUI percentuale, fase,
+   contatore e nome del file dopo ogni estrazione e ogni pubblicazione.
 8. Pubblica tutti i file sotto l'unica cartella configurata (`Media` di default). I
    nomi originali non vengono mai modificati: un file identico viene deduplicato;
    un omonimo differente conserva il nome ed è separato sotto `_conflitti/<hash>/`.
@@ -111,9 +113,27 @@ aggiuntivo o configurazioni Google Cloud.
    un riavvio riparte dall'inizio della griglia e salta esattamente quegli ID.
 11. Se lo ZIP contiene meno file degli elementi selezionati, il lotto viene rifiutato
     e non viene marcato completato (più file sono ammessi, ad esempio per Live Photo).
+    Lo ZIP parziale viene verificato e preservato in `IncompleteArchives`, quindi il
+    programma riparte dal primo ID non completato con un lotto dimezzato.
 
-Se il NAS viene disconnesso, l'hash non coincide o l'estrazione fallisce, l'operazione
-si ferma e lo ZIP locale non viene eliminato, così il lotto può essere recuperato.
+## Ripristino automatico
+
+Premendo **Avvia**, l'intenzione di sincronizzare viene salvata nel profilo Chrome.
+Resta attiva attraverso errori, ricaricamenti della scheda e riavvii di Chrome e viene
+rimossa soltanto premendo **Interrompi** o dopo la scansione completa. Ogni errore di
+selezione, download, Native Host, estrazione, verifica o conteggio avvia un backoff e
+un nuovo tentativo. Il lotto viene dimezzato progressivamente fino a un solo elemento;
+dopo i successi cresce gradualmente verso la dimensione configurata.
+
+Un watchdog viene rinnovato a ogni avanzamento del download. Se non arrivano byte per
+il numero di minuti configurato, Chrome annulla quel tentativo e l'app lo ripete. Gli
+ID sono marcati completati soltanto dopo estrazione e verifica, quindi un errore non fa
+saltare elementi. File già pubblicati da un tentativo parziale vengono riconosciuti
+tramite SHA-256 e non duplicati nel retry.
+
+Se il NAS viene disconnesso, l'hash non coincide o l'estrazione fallisce, il tentativo
+corrente termina ma la sincronizzazione resta attiva e riprova con backoff. Lo ZIP
+locale non viene eliminato finché non è stato copiato o preservato in modo verificato.
 
 ## Permessi richiesti
 

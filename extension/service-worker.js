@@ -26,6 +26,35 @@ function nativeMessage(payload) {
   });
 }
 
+function nativeMoveWithProgress(payload) {
+  return new Promise((resolve, reject) => {
+    const port = chrome.runtime.connectNative("it.gphoto2mycloud.host");
+    let settled = false;
+    port.onMessage.addListener(response => {
+      if (response?.event === "progress") {
+        chrome.runtime.sendMessage({
+          type:"progress-ui", phase:"extracting", phaseLabel:response.phaseLabel,
+          message:response.message, processPercent:72 + response.percent * .27,
+          batchPercent:response.percent, batchLabel:`Estrazione ${response.current}/${response.total}`,
+          detail:response.file || ""
+        }).catch(() => {});
+      } else if (response?.ok) {
+        settled = true;
+        resolve(response);
+        port.disconnect();
+      } else {
+        settled = true;
+        reject(new Error(response?.error || "Errore durante l'estrazione"));
+        port.disconnect();
+      }
+    });
+    port.onDisconnect.addListener(() => {
+      if (!settled) reject(new Error(chrome.runtime.lastError?.message || "Servizio macOS disconnesso durante l'estrazione"));
+    });
+    port.postMessage(payload);
+  });
+}
+
 async function ensureDebugger(tabId) {
   const target = {tabId};
   const targets = await chrome.debugger.getTargets();
@@ -60,7 +89,11 @@ async function dispatchEscape(tabId) {
 
 chrome.downloads.onCreated.addListener(async item => {
   const job = await getJob();
-  if (job && !job.downloadId) await setJob({...job, downloadId: item.id});
+  if (job && !job.downloadId) {
+    await setJob({...job, downloadId: item.id});
+    await chrome.alarms.clear("gphoto-download-watchdog");
+    chrome.alarms.create("gphoto-download-watchdog", {delayInMinutes: job.settings.downloadTimeoutMinutes});
+  }
 });
 
 chrome.downloads.onChanged.addListener(async delta => {
@@ -74,18 +107,22 @@ chrome.downloads.onChanged.addListener(async delta => {
   }
   if (!job || job.downloadId !== delta.id) return;
   if (delta.bytesReceived || delta.totalBytes) {
+    await chrome.alarms.clear("gphoto-download-watchdog");
+    chrome.alarms.create("gphoto-download-watchdog", {delayInMinutes: job.settings.downloadTimeoutMinutes});
     const [current] = await chrome.downloads.search({id: delta.id});
     const percent = current.totalBytes > 0 ? current.bytesReceived / current.totalBytes * 100 : 0;
     chrome.runtime.sendMessage({type:"progress-ui",phase:"downloading",phaseLabel:"Download da Google Foto",message:current.totalBytes>0?`Scaricati ${(current.bytesReceived/1048576).toFixed(1)} di ${(current.totalBytes/1048576).toFixed(1)} MB`:`Scaricati ${(current.bytesReceived/1048576).toFixed(1)} MB`,processPercent:30+percent*.35,batchPercent:percent,batchLabel:"Download ZIP",detail:current.filename.split("/").pop()}).catch(()=>{});
   }
   if (delta.error) {
+    await chrome.alarms.clear("gphoto-download-watchdog");
     await setJob(null);
     await chrome.tabs.sendMessage(job.tabId, {type: "batchResult", ok: false, error: `Chrome: ${delta.error.current}`}).catch(() => {});
   } else if (delta.state?.current === "complete") {
+    await chrome.alarms.clear("gphoto-download-watchdog");
     try {
       const [item] = await chrome.downloads.search({id: delta.id});
       chrome.runtime.sendMessage({type:"progress-ui",phase:"extracting",phaseLabel:"Estrazione sul My Cloud",message:"Download completo, estrazione e verifica in corso",processPercent:72,batchPercent:0,batchLabel:"Estrazione file",detail:item.filename.split("/").pop()}).catch(()=>{});
-      const moved = await nativeMessage({
+      const moved = await nativeMoveWithProgress({
         command: "move", source: item.filename, destination: job.settings.destination,
         downloadRoot: job.settings.downloadRoot,
         extractedFolder: job.settings.extractedFolder,
@@ -103,8 +140,32 @@ chrome.downloads.onChanged.addListener(async delta => {
   }
 });
 
+chrome.alarms.onAlarm.addListener(async alarm => {
+  if (alarm.name !== "gphoto-download-watchdog") return;
+  const job = await getJob();
+  if (!job) return;
+  if (job.downloadId) await chrome.downloads.cancel(job.downloadId).catch(() => {});
+  await setJob(null);
+  await chrome.tabs.sendMessage(job.tabId, {type:"batchResult",ok:false,error:`Download senza avanzamento per ${job.settings.downloadTimeoutMinutes} minuti`}).catch(() => {});
+});
+
+async function resumeRequested(tabId) {
+  const {syncDesired, settings} = await chrome.storage.local.get(["syncDesired", "settings"]);
+  if (!syncDesired || !settings) return;
+  chrome.tabs.sendMessage(tabId, {type:"start", settings}).catch(() => {});
+}
+
+chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
+  if (change.status === "complete" && tab.url?.startsWith("https://photos.google.com/")) resumeRequested(tabId);
+});
+chrome.runtime.onStartup.addListener(async () => {
+  const tabs = await chrome.tabs.query({url:"https://photos.google.com/*"});
+  if (tabs[0]) resumeRequested(tabs[0].id);
+});
+
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message.type === "progress") {
+    if (message.phase === "complete") chrome.storage.local.set({syncDesired:false});
     chrome.runtime.sendMessage({...message, type: "progress-ui"}).catch(() => {});
     return;
   }
@@ -125,18 +186,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message.type === "trustedClick") {
     if (!sender.tab?.id) { respond({ok: false, error: "Scheda non disponibile"}); return; }
     ensureDebugger(sender.tab.id).then(async target => {
-      const modifiers = message.shift ? 8 : 0;
-      if (message.shift) {
-        await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {type:"rawKeyDown",key:"Shift",code:"ShiftLeft",modifiers:8,windowsVirtualKeyCode:16});
-      }
-      try {
-        await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {type: "mousePressed", x: message.x, y: message.y, button: "left", clickCount: 1, modifiers});
-        await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {type: "mouseReleased", x: message.x, y: message.y, button: "left", clickCount: 1, modifiers});
-      } finally {
-        if (message.shift) {
-          await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {type:"keyUp",key:"Shift",code:"ShiftLeft",windowsVirtualKeyCode:16});
-        }
-      }
+      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {type: "mousePressed", x: message.x, y: message.y, button: "left", clickCount: 1});
+      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {type: "mouseReleased", x: message.x, y: message.y, button: "left", clickCount: 1});
       respond({ok: true});
     }, error => respond({ok: false, error: error.message}));
     return true;
@@ -154,6 +205,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       const prepared = await nativeMessage({command: "prepare", destination: message.settings.destination, downloadRoot: message.settings.downloadRoot});
       chrome.runtime.sendMessage({type:"progress-ui",phase:"requesting-download",phaseLabel:"Download locale pronto",message:"Chrome salverà temporaneamente lo ZIP sul Mac",processPercent:28,batchPercent:100,batchLabel:"Destinazione pronta",detail:`Cartella attesa: ${prepared.downloadPath}`}).catch(()=>{});
       await setJob({tabId, settings: message.settings, photoIds: message.photoIds, downloadPath: prepared.downloadPath, downloadId: null, startedAt: Date.now() - 1000});
+      chrome.alarms.create("gphoto-download-watchdog", {delayInMinutes: message.settings.downloadTimeoutMinutes});
       await dispatchShiftD(tabId);
       respond({ok: true});
     }).catch(async error => {

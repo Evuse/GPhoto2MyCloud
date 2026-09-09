@@ -4,7 +4,7 @@ import unittest
 import zipfile
 from unittest.mock import patch
 
-from native_host import digest, extract_download, handle, safe_relative, unique_target
+from native_host import digest, extract_download, handle, preserve_incomplete_archive, safe_relative, unique_target
 
 
 class NativeHostTests(unittest.TestCase):
@@ -51,6 +51,32 @@ class NativeHostTests(unittest.TestCase):
             self.assertEqual(len(second), 2)
             self.assertEqual(len(list(media.rglob("foto.jpg"))), 1)
             self.assertEqual((media / "Google Photos/2025/foto.jpg").read_bytes(), b"original")
+
+    def test_extraction_reports_monotonic_file_level_progress(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            archive = root / "photos.zip"
+            with zipfile.ZipFile(archive, "w") as bundle:
+                for index in range(4):
+                    bundle.writestr(f"foto-{index}.jpg", f"data-{index}".encode())
+            events = []
+            extract_download(archive, root / "Media", True, "b" * 64, events.append)
+            percentages = [event["percent"] for event in events]
+            self.assertGreater(len(events), 4)
+            self.assertEqual(percentages, sorted(percentages))
+            self.assertEqual(percentages[-1], 95)
+            self.assertEqual(events[-1]["current"], 4)
+
+    def test_incomplete_archive_is_verified_on_nas_before_local_removal(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source = root / "download.zip"
+            source.write_bytes(b"partial but valuable")
+            checksum = digest(source)
+            target = preserve_incomplete_archive(source, root / "nas", checksum)
+            self.assertFalse(source.exists())
+            self.assertEqual(digest(target), checksum)
+            self.assertEqual(target.parent.name, "IncompleteArchives")
 
     def test_rejects_zip_path_traversal(self):
         with self.assertRaisesRegex(ValueError, "non sicuro"):

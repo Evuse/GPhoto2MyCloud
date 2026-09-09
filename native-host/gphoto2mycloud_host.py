@@ -63,17 +63,17 @@ def publish_file(source: Path, target: Path, verify: bool, conflicts: Path | Non
     return target, checksum
 
 
-def extract_download(source: Path, media: Path, verify: bool, archive_hash: str | None = None) -> list[dict]:
+def extract_download(source: Path, media: Path, verify: bool, archive_hash: str | None = None, progress=None) -> list[dict]:
     staging = media.parent / f".gphoto2mycloud-{uuid.uuid4().hex}"
     staging.mkdir(parents=True)
     extracted: list[dict] = []
     try:
         if zipfile.is_zipfile(source):
             with zipfile.ZipFile(source) as archive:
-                for member in archive.infolist():
+                members = [member for member in archive.infolist() if not member.is_dir()]
+                total = max(1, len(members))
+                for index, member in enumerate(members, 1):
                     relative = safe_relative(member.filename)
-                    if member.is_dir():
-                        continue
                     if (member.external_attr >> 16) & 0o170000 == 0o120000:
                         raise ValueError(f"Link simbolico non consentito: {member.filename}")
                     temporary = staging / relative
@@ -82,20 +82,41 @@ def extract_download(source: Path, media: Path, verify: bool, archive_hash: str 
                         shutil.copyfileobj(reader, writer, 4 * 1024 * 1024)
                         writer.flush()
                         os.fsync(writer.fileno())
+                    if progress:
+                        progress({"phaseLabel":"Estrazione ZIP","message":f"Estratto {index} di {total}","percent":round(index / total * 55, 1),"current":index,"total":total,"file":member.filename})
         else:
+            total = 1
             temporary = staging / safe_relative(source.name)
             with source.open("rb") as reader, temporary.open("xb") as writer:
                 shutil.copyfileobj(reader, writer, 4 * 1024 * 1024)
                 writer.flush()
                 os.fsync(writer.fileno())
-        for temporary in sorted(path for path in staging.rglob("*") if path.is_file()):
+            if progress:
+                progress({"phaseLabel":"Preparazione file","message":"File locale pronto per la pubblicazione","percent":55,"current":1,"total":1,"file":source.name})
+        staged_files = sorted(path for path in staging.rglob("*") if path.is_file())
+        total = max(1, len(staged_files))
+        for index, temporary in enumerate(staged_files, 1):
             relative = temporary.relative_to(staging)
             conflicts = media / "_conflitti" / (archive_hash or "archivio-sconosciuto")[:16]
             published, checksum = publish_file(temporary, media / relative, verify, conflicts)
             extracted.append({"file": str(published.relative_to(media)), "bytes": published.stat().st_size, "sha256": checksum})
+            if progress:
+                progress({"phaseLabel":"Verifica e pubblicazione","message":f"Verificato {index} di {total}","percent":round(55 + index / total * 40, 1),"current":index,"total":total,"file":str(relative)})
         return extracted
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+
+
+def preserve_incomplete_archive(source: Path, destination: Path, checksum: str) -> Path:
+    folder = destination / "IncompleteArchives"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = unique_target(folder, f"{checksum[:12]}-{source.name}")
+    shutil.copy2(source, target)
+    if digest(target) != checksum:
+        target.unlink(missing_ok=True)
+        raise OSError("Impossibile preservare l'archivio incompleto sul My Cloud")
+    source.unlink()
+    return target
 
 
 def mounted_destination(raw: str) -> Path:
@@ -111,7 +132,7 @@ def mounted_destination(raw: str) -> Path:
     return destination
 
 
-def handle(message: dict) -> dict:
+def handle(message: dict, progress=None) -> dict:
     destination = mounted_destination(str(message.get("destination", "")))
     if message.get("command") == "status":
         free = shutil.disk_usage(destination).free
@@ -131,12 +152,15 @@ def handle(message: dict) -> dict:
     media = destination / folder
     media.mkdir(parents=True, exist_ok=True)
     archive_hash = digest(source)
-    files = extract_download(source, media, bool(message.get("verify", True)), archive_hash)
     photo_ids = list(dict.fromkeys(message.get("photoIds") or []))
+    if progress:
+        progress({"phaseLabel":"Analisi archivio","message":"Lettura dello ZIP scaricato","percent":2,"current":0,"total":max(1, len(photo_ids)),"file":source.name})
+    files = extract_download(source, media, bool(message.get("verify", True)), archive_hash, progress)
     if len(files) < len(photo_ids):
+        preserved = preserve_incomplete_archive(source, destination, archive_hash)
         raise OSError(
             f"Google ha restituito {len(files)} file per {len(photo_ids)} elementi: "
-            "il lotto non viene segnato come completato"
+            f"lotto non completato, archivio preservato in {preserved}, retry automatico"
         )
     if message.get("keepArchives") and zipfile.is_zipfile(source):
         archives = destination / "Archives"
@@ -155,6 +179,8 @@ def handle(message: dict) -> dict:
     }
     with (destination / ".gphoto2mycloud-history.jsonl").open("a", encoding="utf-8") as log:
         log.write(json.dumps(receipt, ensure_ascii=False) + "\n")
+    if progress:
+        progress({"phaseLabel":"Estrazione completata","message":f"{len(files)} file disponibili sul My Cloud","percent":100,"current":len(files),"total":len(files),"file":str(media)})
     return {"ok": True, **receipt}
 
 
@@ -180,7 +206,7 @@ def main() -> None:
             message = read_message()
             if message is None:
                 break
-            reply(handle(message))
+            reply(handle(message, lambda event: reply({"ok": True, "event": "progress", **event})))
         except Exception as error:
             reply({"ok": False, "error": str(error)})
 

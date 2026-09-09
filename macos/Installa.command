@@ -44,7 +44,7 @@ fi
 
 echo "Installazione verificata:"
 echo "  versione: $INSTALLED_VERSION"
-echo "  build: FINAL-PROD-3.2-LOCAL-ZIP"
+echo "  build: FINAL-PROD-3.4-AUTO-RECOVERY"
 echo "  estensione: $EXTENSION_DEST"
 echo "  profili aggiornati: $UPDATE_RESULT"
 echo -n "  SHA-256 pannello: "
@@ -68,5 +68,5 @@ osacompile -o "$HOME/Applications/GPhoto2MyCloud.app" -e "do shell script quoted
 
 echo "Riavvio Chrome tramite GPhoto2MyCloud.app…"
 "$LAUNCHER"
-echo "Fatto. Il pannello deve mostrare v$VERSION e FINAL-PROD-3.2-LOCAL-ZIP."
+echo "Fatto. Il pannello deve mostrare v$VERSION e FINAL-PROD-3.4-AUTO-RECOVERY."
 sleep 4

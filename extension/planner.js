@@ -8,10 +8,11 @@
       downloadRoot: String(input.downloadRoot || "~/Downloads"),
       extractedFolder: String(input.extractedFolder || "Media"),
       keepArchives: input.keepArchives === true,
-      rangeSelection: input.rangeSelection !== false,
       batchSize: Math.min(500, Math.max(1, Number(input.batchSize) || 250)),
       clickDelayMs: Math.min(3000, Math.max(100, Number(input.clickDelayMs) || 350)),
       settleSeconds: Math.min(120, Math.max(2, Number(input.settleSeconds) || 8)),
+      retryDelaySeconds: Math.min(300, Math.max(2, Number(input.retryDelaySeconds) || 10)),
+      downloadTimeoutMinutes: Math.min(120, Math.max(2, Number(input.downloadTimeoutMinutes) || 20)),
       verifyCopies: input.verifyCopies !== false
     };
   }
@@ -31,7 +32,18 @@
     }
   }
 
-  const api = {clampSettings, downloadState, photoId};
+  function retryAfterFailure(batchSize, failures, baseDelaySeconds) {
+    return {
+      batchSize: Math.max(1, Math.floor(batchSize / 2)),
+      delaySeconds: Math.min(300, baseDelaySeconds * (2 ** Math.min(5, Math.max(0, failures - 1))))
+    };
+  }
+
+  function batchAfterSuccess(batchSize, configuredMaximum) {
+    return Math.min(configuredMaximum, Math.max(batchSize + 1, Math.floor(batchSize * 1.5)));
+  }
+
+  const api = {clampSettings, downloadState, photoId, retryAfterFailure, batchAfterSuccess};
   root.GPhotoPlanner = api;
   if (typeof module !== "undefined") module.exports = api;
 })(typeof globalThis === "undefined" ? this : globalThis);

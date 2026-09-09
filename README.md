@@ -1,131 +1,109 @@
-# GPhoto2MyCloud
+# GPhoto2MyCloud per macOS
 
-Backup **byte-for-byte** di Google Foto su un hard disk/NAS WD My Cloud. Il progetto
-scarica gli archivi ufficiali di Google Takeout da Google Drive, li estrae senza
-ricodificare foto o video, conserva i sidecar JSON e (per impostazione predefinita)
-anche l'archivio originale verificabile tramite SHA-256.
+Applicazione grafica per pilotare **la sessione Google Foto già aperta in Chrome**:
+seleziona le foto visibili in lotti, invia a Chrome il vero comando **⇧D**, segue il
+download e trasferisce il risultato sul volume My Cloud già montato in `/Volumes`.
 
-## Perché questo metodo
+![Architettura](https://img.shields.io/badge/macOS-Chrome%20Extension%20%2B%20Native%20Host-4285F4)
 
-Dal 31 marzo 2025 le API Google Photos Library non consentono più a un'app di
-elencare e scaricare liberamente l'intera libreria: l'accesso è limitato ai contenuti
-creati dall'app. Di conseguenza strumenti basati sul vecchio scope `photoslibrary.readonly`
-non sono una soluzione affidabile per un export completo. Riferimento ufficiale:
-[Google Photos API updates](https://developers.google.com/photos/support/updates).
+## Una precisazione importante su “non perdere niente”
 
-Il percorso supportato per esportare **tutti i dati** è Google Takeout. Takeout può
-consegnare gli archivi in Google Drive e creare export programmati ogni due mesi per
-un anno; Google precisa inoltre che il download non rimuove i dati dai suoi server.
-Riferimento ufficiale: [How to download your Google data](https://support.google.com/accounts/answer/3024190).
+Questa implementazione segue esattamente il flusso manuale richiesto, senza Google
+Takeout e senza attendere export periodici. Il file scaricato è quello fornito dal
+comando Download dell'interfaccia Google Foto e non viene aperto, modificato o
+ricompresso dall'app.
 
-Non esiste un interruttore ufficiale per un backup continuo e immediato dell'intera
-libreria. Questa soluzione automatizza in modo affidabile tutto ciò che viene dopo
-la generazione periodica di Takeout. La creazione/rinnovo annuale dell'export resta
-un'operazione Google da effettuare nell'account.
+Tuttavia **⇧D non esporta tutte le informazioni gestite separatamente da Google**:
+album, persone, commenti e alcuni metadati applicativi non vengono consegnati come
+sidecar. Nessuno script che imiti il download manuale può preservare dati che Google
+non include nel download. Per una copia forense completa di quei dati resta
+necessario Takeout. L'app non nasconde questo limite né promette una garanzia che il
+sito web non può offrire.
 
-## Garanzie
+Anche l'interfaccia di Google Foto è privata e può cambiare senza preavviso. Il
+motore interrompe il processo mostrando chiaramente l'errore invece di cancellare o
+sovrascrivere file. Il limite configurabile è al massimo 500 elementi per lotto per
+evitare richieste massive che Chrome/Google potrebbero rifiutare.
 
-- nessuna libreria fotografica apre, converte o ricomprime i media;
-- foto, video e file JSON vengono copiati come sequenze di byte inalterate;
-- ogni archivio è identificato con SHA-256 e importato una sola volta;
-- estrazione in una directory temporanea e pubblicazione atomica sul NAS;
-- archivio Takeout originale conservato in `takeout-archives/`;
-- ricevuta `.gphoto2mycloud.json` con hash dell'intero albero estratto per ogni
-  import e manifest SQLite;
-- protezione da path traversal e link malevoli negli archivi.
+## Interfaccia
 
-> “Originale” significa il file restituito da Takeout. Gli album, le descrizioni,
-> le date e altre informazioni che non sono incorporate nel file restano nei JSON:
-> per non perdere informazioni non eliminarli e lasciare `retain_archives = true`.
+Il pannello laterale di Chrome è la GUI macOS dell'app e mostra:
 
-## 1. Preparare Google Takeout
+- fase corrente, messaggio e contatore della selezione;
+- percorso del volume SMB, cartella download di Chrome e spazio disponibile;
+- dimensione dei lotti, ritardo tra click e attesa di caricamento della griglia;
+- attivazione/disattivazione della verifica SHA-256;
+- comandi **Avvia backup** e **Interrompi**;
+- registro cronologico visibile durante l'intero processo.
 
-1. Aprire [Google Takeout](https://takeout.google.com/).
-2. Deselezionare tutto e selezionare **Google Foto**; includere tutti gli album.
-3. Scegliere **Aggiungi a Drive**, export ogni 2 mesi per 1 anno, formato ZIP e una
-   dimensione archivio adatta al disco (ad esempio 10 GB).
-4. Creare l'export. Gli archivi appariranno nella cartella `Takeout` di Drive.
+Le preferenze restano nel profilo Chrome locale. Il pannello non chiede password e
+non copia cookie: opera esclusivamente nella scheda `photos.google.com` già aperta.
 
-Per il primo trasferimento è prudente verificare lo spazio libero: con
-`retain_archives = true` servono temporaneamente circa due volte i dati esportati,
-più lo spazio di lavoro.
+## Installazione su MacBook
 
-## 2. Montare My Cloud
+Requisiti: macOS, Google Chrome, Python 3 di sistema o installato e My Cloud già
+montato via SMB (ad esempio `/Volumes/MyCloud`).
 
-Il NAS deve essere montato stabilmente sull'host, per esempio via SMB:
+1. Fare doppio clic su `macos/Installa.command`. macOS può richiedere **Apri** dal
+   menu contestuale la prima volta.
+2. Nella pagina Chrome aperta, abilitare **Modalità sviluppatore**, scegliere
+   **Carica estensione non pacchettizzata** e indicare la cartella `extension/`.
+3. Aprire `https://photos.google.com/` nel profilo Chrome già autenticato.
+4. Premere l'icona GPhoto2MyCloud, impostare ad esempio
+   `/Volumes/MyCloud/GooglePhotos` e premere **Verifica disco**.
+5. Premere **Avvia backup** e lasciare la scheda aperta.
 
-```bash
-sudo mkdir -p /mnt/mycloud
-sudo mount -t cifs //192.168.1.50/Public /mnt/mycloud \
-  -o credentials=/root/.smbcredentials,uid=65532,gid=65532,file_mode=0660,dir_mode=0770
-```
+L'installazione manuale dell'estensione è un vincolo di sicurezza imposto da Chrome
+alle estensioni non pubblicate sul Chrome Web Store. Non sono necessarie API Google,
+OAuth aggiuntivo o configurazioni Google Cloud.
 
-Usare credenziali in un file protetto (`chmod 600`), non nel repository. Per un
-servizio permanente aggiungere il mount a `/etc/fstab` e testarlo prima di avviare
-il container.
+## Flusso e sicurezza dei dati
 
-## 3. Collegare Google Drive con rclone
+1. Il content script considera esclusivamente checkbox appartenenti a tessere con
+   link `/photo/`, senza usare i checkbox di intere date.
+2. Seleziona lentamente fino alla dimensione del lotto configurata.
+3. Il service worker usa il protocollo Chrome DevTools per generare un evento ⇧D
+   attendibile; Chrome mostra l'avviso standard mentre il debugger è collegato.
+4. L'app aspetta che `chrome.downloads` dichiari il file completo.
+5. Il servizio nativo accetta sorgenti solo dalla cartella Download configurata e
+   destinazioni solo sotto `/Volumes`.
+6. Copia in un file `.gphoto2mycloud-partial`, forza il flush sul disco, confronta
+   SHA-256 sorgente/destinazione e solo dopo pubblica il file e rimuove la sorgente.
+7. Non sovrascrive mai: in caso di omonimia aggiunge un numero progressivo.
+8. Registra nome, byte, data e SHA-256 in
+   `.gphoto2mycloud-history.jsonl` sul My Cloud.
 
-Installare rclone e creare un remote chiamato `gdrive`:
+Se il NAS viene disconnesso, l'hash non coincide o Chrome non avvia il download,
+l'operazione si ferma e il file originale in Download viene lasciato intatto.
 
-```bash
-rclone config
-rclone lsf gdrive:Takeout
-```
+## Permessi richiesti
 
-Il token OAuth resta nel file locale di rclone e non entra nell'immagine o nel
-repository. L'app richiede accesso a Drive perché è lì che Takeout deposita gli
-archivi, non usa la limitata Photos Library API.
+- `activeTab` e accesso a `photos.google.com`: selezione nella scheda attiva;
+- `debugger`: invio del comando da tastiera ⇧D;
+- `downloads`: attesa del completamento e individuazione del file;
+- `nativeMessaging`: copia verificata sul volume SMB;
+- `storage` e `sidePanel`: configurazione e GUI.
 
-## 4. Avvio con Docker Compose
+Il servizio nativo accetta messaggi unicamente dall'ID fisso dell'estensione
+`mocnnikkncmfihikmbkhlmhkjegjmime`.
 
-```bash
-cp config.example.toml config.toml
-export MYCLOUD_PATH=/mnt/mycloud
-docker compose up -d --build
-docker compose logs -f gphoto2mycloud
-```
+## Sviluppo e test
 
-Il container controlla Drive ogni sei ore. Modificare `poll_seconds` (minimo 60)
-se necessario. Directory create sul NAS:
-
-```text
-GooglePhotos/
-├── takeout/           # alberi estratti, media + sidecar + ricevuta
-└── takeout-archives/  # ZIP/TGZ originali nominati con prefisso SHA-256
-```
-
-## Uso senza Docker
-
-Richiede Python 3.11+ e rclone:
+Non ci sono dipendenze npm o Python esterne:
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install -e .
-cp config.example.toml config.toml
-gphoto2mycloud --config config.toml run
-gphoto2mycloud --config config.toml verify
+node --test tests/planner.test.js
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+python3 -m py_compile native-host/gphoto2mycloud_host.py
 ```
 
-Per importare archivi già scaricati, impostare `source_mode = "local"` e `source`
-alla loro directory. `run` esegue un ciclo; `watch` resta in esecuzione.
+### Limiti noti
 
-## Ripristino e deduplicazione
-
-La struttura Takeout viene deliberatamente mantenuta: tentare di unificare file con
-lo stesso nome o hash può far perdere appartenenza agli album o sidecar. Il manifest
-evita solo di reimportare lo **stesso archivio**. Per un ripristino conservativo si
-parte dagli archivi in `takeout-archives/`; `verify` controlla dimensione e SHA-256
-di ogni archivio conservato e ricalcola l'hash di tutti i file estratti:
-
-```bash
-docker compose run --rm gphoto2mycloud --config /config/config.toml verify
-```
-
-## Sicurezza operativa
-
-- Il backup non è completo finché `verify` non termina senza errori.
-- Conservare almeno una seconda copia offline o in un luogo diverso (regola 3-2-1).
-- Non esporre SMB su Internet e non committare `config.toml`, token rclone o password.
-- Controllare annualmente che l'export Takeout programmato sia stato rinnovato.
+- La prima installazione richiede il caricamento esplicito dell'estensione; per
+  eliminarlo occorre pubblicare e firmare l'estensione sul Chrome Web Store.
+- Il download multiplo prodotto da Google è normalmente uno ZIP; l'app lo conserva
+  tale e quale, evitando qualsiasi trasformazione.
+- La scansione dipende dalla struttura accessibile della griglia Google Foto. Se
+  Google la modifica, l'app fallisce esplicitamente e il selettore va aggiornato.
+- Per minimizzare throttling e blocchi anti-abuso, usare l'impostazione predefinita
+  e non nascondere o sospendere Chrome durante il processo.

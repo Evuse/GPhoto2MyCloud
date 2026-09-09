@@ -1,10 +1,11 @@
 from pathlib import Path
+import json
 import tempfile
 import unittest
 import zipfile
 from unittest.mock import patch
 
-from native_host import digest, extract_download, handle, preserve_incomplete_archive, safe_relative, unique_target
+from native_host import checkpoint_page, digest, extract_download, handle, preserve_incomplete_archive, safe_relative, unique_target
 
 
 class NativeHostTests(unittest.TestCase):
@@ -77,6 +78,23 @@ class NativeHostTests(unittest.TestCase):
             self.assertFalse(source.exists())
             self.assertEqual(digest(target), checksum)
             self.assertEqual(target.parent.name, "IncompleteArchives")
+
+    def test_checkpoint_pages_rebuild_completed_ids_from_nas_history(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            history = root / ".gphoto2mycloud-history.jsonl"
+            history.write_text('\n'.join((
+                json.dumps({"photoIds":["photo-1", "photo-2"]}),
+                "invalid line is ignored",
+                json.dumps({"photoIds":["photo-3"]}),
+            )) + '\n')
+            first = checkpoint_page(root, limit=2)
+            second = checkpoint_page(root, cursor=first["cursor"], limit=2)
+            self.assertEqual(first["photoIds"], ["photo-1", "photo-2"])
+            self.assertFalse(first["eof"])
+            self.assertEqual(second["photoIds"], ["photo-3"])
+            self.assertEqual(second["lastPhotoId"], "photo-3")
+            self.assertTrue(second["eof"])
 
     def test_rejects_zip_path_traversal(self):
         with self.assertRaisesRegex(ValueError, "non sicuro"):

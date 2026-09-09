@@ -9,7 +9,7 @@ ROOT = Path(__file__).parents[1]
 class ProjectIntegrityTests(unittest.TestCase):
     def test_manifest_references_current_ui_and_scripts(self):
         manifest = json.loads((ROOT / "extension/manifest.json").read_text())
-        self.assertEqual(manifest["version"], "3.4.1")
+        self.assertEqual(manifest["version"], "3.5.0")
         self.assertIn("scripting", manifest["permissions"])
         referenced = [manifest["side_panel"]["default_path"], manifest["background"]["service_worker"]]
         referenced.extend(manifest["content_scripts"][0]["js"])
@@ -29,6 +29,8 @@ class ProjectIntegrityTests(unittest.TestCase):
         self.assertIn('response?.event === "progress"', worker)
         self.assertIn("chrome.scripting.executeScript", worker)
         self.assertIn("pingAutomation", worker)
+        self.assertIn("syncCheckpointFromNas", worker)
+        self.assertIn('command:"checkpoint"', worker)
         automation = (ROOT / "extension/automation.js").read_text()
         self.assertIn("__gphoto2mycloudAutomationLoaded", automation)
 

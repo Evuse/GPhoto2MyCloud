@@ -52,6 +52,37 @@
     }
   }
 
+  async function seekResumePoint(lastPhotoId, settings) {
+    rewindTimeline();
+    if (!lastPhotoId) return false;
+    await sleep(Math.min(3, settings.settleSeconds) * 1000);
+    let bottomChecks = 0;
+    let screens = 0;
+    while (!stopped && bottomChecks < 4) {
+      const link = [...document.querySelectorAll('a[href*="/photo/"]')]
+        .find(item => GPhotoPlanner.photoId(item.href, location.href) === lastPhotoId);
+      if (link) {
+        const scroller = timelineScroller();
+        const scrollerTop = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
+        // Keep the checkpoint row visible: items later in the same row may not have
+        // belonged to the completed batch and must never be skipped.
+        const nextPosition = scrollPosition(scroller) + Math.max(0, link.getBoundingClientRect().top - scrollerTop);
+        if (scroller === document.scrollingElement) scrollTo(0, nextPosition);
+        else { scroller.scrollTop = nextPosition; scroller.dispatchEvent(new Event("scroll", {bubbles:true})); }
+        await sleep(Math.min(3, settings.settleSeconds) * 1000);
+        report("resuming", "Checkpoint My Cloud raggiunto", {phaseLabel:"Ripresa dal punto salvato",processPercent:8,batchPercent:0,detail:`Ultimo ID completato ${lastPhotoId} · ${screens} schermate saltate`});
+        return true;
+      }
+      screens += 1;
+      const advanced = await advanceTimeline({...settings, settleSeconds:Math.min(3, settings.settleSeconds)});
+      bottomChecks = advanced ? 0 : bottomChecks + 1;
+      if (screens % 10 === 0) report("resuming", "Ricerca del checkpoint sul My Cloud", {phaseLabel:"Avanzamento rapido",processPercent:5,batchPercent:0,detail:`${screens} schermate saltate · cerco ${lastPhotoId}`});
+    }
+    rewindTimeline();
+    report("recovering", "Checkpoint non più visibile: scansione sicura dall'inizio", {phaseLabel:"Fallback checkpoint",processPercent:3,batchPercent:0,detail:`Gli ID completati saranno comunque saltati: ${lastPhotoId}`});
+    return false;
+  }
+
   function visiblePhotoCheckboxes() {
     const result = new Map();
     for (const link of document.querySelectorAll('a[href*="/photo/"]')) {
@@ -143,7 +174,6 @@
     running = true;
     stopped = false;
     observed = new Set();
-    processed = new Set((await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || []);
     const settings = GPhotoPlanner.clampSettings(rawSettings);
     let restartAfterUnexpectedError = false;
     try {
@@ -157,9 +187,13 @@
         await sleep(delay * 1000);
       }
       if (stopped) return;
-      rewindTimeline();
-      await sleep(settings.settleSeconds * 1000);
-      report("starting", "Scansione della timeline dall'inizio", {phaseLabel:"Preparazione",batchPercent:0,batchLabel:"Lotto non ancora iniziato",detail:`Registro: ${processed.size} elementi già completati · modalità focus in background attiva`});
+      report("starting", "Lettura del checkpoint dal My Cloud", {phaseLabel:"Sincronizzazione registro",batchPercent:0,batchLabel:"Lotto non ancora iniziato"});
+      const checkpoint = await chrome.runtime.sendMessage({type:"syncCheckpoint",destination:settings.destination});
+      if (!checkpoint?.ok) throw new Error(checkpoint?.error || "Checkpoint My Cloud non disponibile");
+      processed = new Set((await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || []);
+      const resumed = await seekResumePoint(checkpoint.lastPhotoId, settings);
+      if (!resumed) await sleep(settings.settleSeconds * 1000);
+      report("starting", resumed ? "Ripresa dopo l'ultimo elemento archiviato" : "Scansione della timeline dall'inizio", {phaseLabel:"Preparazione completata",batchPercent:0,batchLabel:"Lotto non ancora iniziato",detail:`My Cloud: ${checkpoint.nasCount} ID · registro unificato: ${processed.size} · modalità background attiva`});
       let effectiveBatchSize = settings.batchSize;
       let consecutiveFailures = 0;
       while (!stopped) {
@@ -196,9 +230,15 @@
             batchLabel:`Nuovo lotto: ${effectiveBatchSize}`, detail:`${error.message || error} · nuovo tentativo tra ${delay}s`
           });
           await clearSelection();
-          rewindTimeline();
           observed = new Set();
           await sleep(delay * 1000);
+          const latest = await chrome.runtime.sendMessage({type:"syncCheckpoint",destination:settings.destination}).catch(() => null);
+          if (latest?.ok) {
+            processed = new Set((await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || []);
+            await seekResumePoint(latest.lastPhotoId, settings);
+          } else {
+            rewindTimeline();
+          }
         }
       }
     } catch (error) {

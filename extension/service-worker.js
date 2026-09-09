@@ -55,6 +55,25 @@ function nativeMoveWithProgress(payload) {
   });
 }
 
+async function syncCheckpointFromNas(destination) {
+  let cursor = 0;
+  let eof = false;
+  let lastPhotoId = null;
+  const nasIds = new Set();
+  while (!eof) {
+    const page = await nativeMessage({command:"checkpoint", destination, cursor, limit:2000});
+    for (const id of page.photoIds || []) nasIds.add(id);
+    if (page.lastPhotoId) lastPhotoId = page.lastPhotoId;
+    if (!page.eof && page.cursor === cursor) throw new Error("Checkpoint My Cloud non avanza");
+    cursor = page.cursor;
+    eof = page.eof;
+  }
+  const local = (await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || [];
+  const completedPhotoIds = [...new Set([...local, ...nasIds])];
+  await chrome.storage.local.set({completedPhotoIds, nasResumePhotoId:lastPhotoId});
+  return {ok:true, completedCount:completedPhotoIds.length, nasCount:nasIds.size, lastPhotoId};
+}
+
 async function ensureDebugger(tabId) {
   const target = {tabId};
   const targets = await chrome.debugger.getTargets();
@@ -209,6 +228,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   }
   if (message.type === "hostStatus") {
     nativeMessage({command: "status", destination: message.destination}).then(respond, error => respond({ok: false, error: error.message}));
+    return true;
+  }
+  if (message.type === "syncCheckpoint") {
+    syncCheckpointFromNas(message.destination).then(respond, error => respond({ok:false,error:error.message}));
     return true;
   }
   if (message.type === "ensureAutomationContent") {

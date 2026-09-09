@@ -119,6 +119,31 @@ def preserve_incomplete_archive(source: Path, destination: Path, checksum: str) 
     return target
 
 
+def checkpoint_page(destination: Path, cursor: int = 0, limit: int = 2000) -> dict:
+    history = destination / ".gphoto2mycloud-history.jsonl"
+    if not history.is_file():
+        return {"ok": True, "photoIds": [], "cursor": 0, "eof": True, "lastPhotoId": None}
+    photo_ids: list[str] = []
+    last_photo_id = None
+    with history.open("rb") as stream:
+        stream.seek(max(0, cursor))
+        while len(photo_ids) < limit:
+            line = stream.readline()
+            if not line:
+                break
+            try:
+                receipt = json.loads(line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            receipt_ids = [str(value) for value in receipt.get("photoIds", []) if value]
+            photo_ids.extend(receipt_ids)
+            if receipt_ids:
+                last_photo_id = receipt_ids[-1]
+        next_cursor = stream.tell()
+        eof = not stream.read(1)
+    return {"ok": True, "photoIds": photo_ids, "cursor": next_cursor, "eof": eof, "lastPhotoId": last_photo_id}
+
+
 def mounted_destination(raw: str) -> Path:
     destination = Path(raw).expanduser().resolve()
     if not str(destination).startswith("/Volumes/"):
@@ -137,6 +162,8 @@ def handle(message: dict, progress=None) -> dict:
     if message.get("command") == "status":
         free = shutil.disk_usage(destination).free
         return {"ok": True, "freeBytes": free, "freeHuman": f"{free / 1024**3:.1f} GB"}
+    if message.get("command") == "checkpoint":
+        return checkpoint_page(destination, int(message.get("cursor", 0)), int(message.get("limit", 2000)))
     if message.get("command") == "prepare":
         downloads = Path(str(message.get("downloadRoot", "~/Downloads"))).expanduser().resolve()
         if not downloads.is_dir() or not os.access(downloads, os.W_OK):

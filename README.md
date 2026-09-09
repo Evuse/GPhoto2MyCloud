@@ -66,7 +66,7 @@ L'installer crea anche `~/Applications/GPhoto2MyCloud.app`. Per le esecuzioni fu
 avviare questa app: riapre Chrome con le opzioni necessarie a impedire la sospensione
 della timeline quando si lavora in un'altra scheda o applicazione.
 
-> La release resiliente mostra **v3.4.1** e **FINAL-PROD-3.4.1-AUTO-INJECT**. L'installer non si limita più
+> La release resiliente mostra **v3.5.0** e **FINAL-PROD-3.5-NAS-CHECKPOINT**. L'installer non si limita più
 > a copiare il Native Host: installa l'intera estensione sotto
 > `~/Library/Application Support/GPhoto2MyCloud/extension-production`, aggiorna il
 > riferimento del profilo Chrome e riavvia Chrome con quella directory. Se compaiono
@@ -136,6 +136,20 @@ scheda Google Foto. Se la scheda era già aperta prima dell'installazione o del 
 e risponde con “Receiving end does not exist”, l'estensione inietta automaticamente
 `planner.js` e `automation.js`, ripete il ping e soltanto dopo avvia il backup. Lo
 stesso controllo viene eseguito nel ripristino dopo reload e riavvio di Chrome.
+
+### Ripresa dal punto raggiunto sul My Cloud
+
+Il riferimento autorevole non è più soltanto lo storage dell'estensione. A ogni avvio
+il Native Host legge `.gphoto2mycloud-history.jsonl` direttamente dal My Cloud e
+restituisce gli ID completati in pagine da 2.000 elementi, evitando i limiti di
+dimensione del Native Messaging. Il service worker unisce questi ID al registro locale
+e individua l'ultimo elemento archiviato.
+
+La timeline non viene quindi elaborata nuovamente dall'inizio: viene percorsa in
+modalità rapida, senza selezionare né scaricare, fino a trovare l'ultimo ID confermato
+dal NAS. La scansione operativa riparte immediatamente dopo quella tessera. Se la foto
+di checkpoint non esiste più su Google Foto, l'app usa il fallback sicuro dall'inizio,
+ma continua a saltare tutti gli ID già attestati dal My Cloud.
 
 Se il NAS viene disconnesso, l'hash non coincide o l'estrazione fallisce, il tentativo
 corrente termina ma la sincronizzazione resta attiva e riprova con backoff. Lo ZIP

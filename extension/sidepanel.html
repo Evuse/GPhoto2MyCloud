@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>GPhoto2MyCloud</title><link rel="stylesheet" href="sidepanel.css"></head>
+<body><main>
+  <header><div class="mark">G</div><div><h1>GPhoto2MyCloud</h1><p>Production build <span id="version">v…</span></p></div><span id="runBadge" class="badge">PRONTO</span></header>
+
+  <nav class="pipeline" aria-label="Fasi del backup"><span class="current">1 Selezione</span><i>›</i><span>2 Download</span><i>›</i><span>3 Estrazione</span><i>›</i><span>4 Verifica</span></nav>
+
+  <section class="hero">
+    <div class="status-line"><span id="dot"></span><div><strong id="phase">In attesa</strong><p id="message">Apri Google Foto e verifica il disco.</p></div></div>
+    <div class="progress-block"><div><span>Processo corrente</span><b id="processPercent">0%</b></div><progress id="processProgress" max="100" value="0"></progress></div>
+    <div class="progress-block"><div><span id="batchLabel">Lotto corrente</span><b id="batchPercent">0%</b></div><progress id="batchProgress" max="100" value="0"></progress></div>
+    <div class="stats"><article><b id="selectedStat">0</b><span>selezionate</span></article><article><b id="processedStat">0</b><span>archiviate</span></article><article><b id="discoveredStat">0</b><span>individuate</span></article></div>
+  </section>
+
+  <section><h2>01 · Download ed estrazione</h2><label>Volume e cartella di destinazione<input id="destination" value="/Volumes/MyCloud/GooglePhotos"></label><label>Cartella cumulativa dei file estratti<input id="extractedFolder" value="Media"></label><label>Cartella download locale di Chrome<input id="downloadRoot" value="~/Downloads"></label><div class="direct-note">Chrome salva temporaneamente lo ZIP sul Mac. Al completamento l'app lo estrae sul My Cloud, verifica i file e rimuove lo ZIP locale.</div><div class="inline"><button id="check" class="secondary">Verifica destinazione</button><span id="disk">Non verificata</span></div></section>
+
+  <section><h2>02 · Automazione resiliente</h2><div class="grid"><label>Elementi per lotto<input id="batchSize" type="number" min="1" max="500" value="250"></label><label>Intervallo selezione<input id="clickDelayMs" type="number" min="100" max="3000" value="350"><small>millisecondi</small></label><label>Attesa caricamento<input id="settleSeconds" type="number" min="2" max="120" value="8"><small>secondi</small></label><label>Attesa primo retry<input id="retryDelaySeconds" type="number" min="2" max="300" value="10"><small>secondi</small></label><label>Timeout download<input id="downloadTimeoutMinutes" type="number" min="2" max="120" value="20"><small>minuti</small></label></div><div class="direct-note">In caso di errore il lotto viene dimezzato, la timeline riparte dal primo ID non completato e il tentativo viene ripetuto automaticamente. Solo Interrompi arresta la sincronizzazione.</div><label class="toggle"><input id="verifyCopies" type="checkbox" checked><span>Verifica SHA-256 di ogni file estratto</span></label><label class="toggle"><input id="keepArchives" type="checkbox"><span>Conserva anche gli ZIP originali in <code>Archives</code></span></label></section>
+
+  <div class="actions"><button id="start">▶ Avvia / riprendi</button><button id="stop" class="danger" disabled>■ Interrompi</button></div><button id="reset" class="secondary full">Azzera registro e avvia un nuovo backup</button>
+
+  <section class="log-section"><div class="log-heading"><h2>03 · Registro attività</h2><button id="clearLog" class="text-button">Pulisci</button></div><div class="log-columns"><span>Ora</span><span>Livello</span><span>Evento e dettagli</span></div><div id="log" role="log" aria-live="polite"><div class="empty-log">Gli eventi dettagliati appariranno qui.</div></div></section>
+  <section class="diagnostics"><h2>04 · Diagnostica installazione</h2><dl><div><dt>Versione caricata</dt><dd id="diagnosticVersion">—</dd></div><div><dt>Canale</dt><dd>Production 3.5 NAS Checkpoint</dd></div><div><dt>ID estensione</dt><dd id="extensionId">—</dd></div><div><dt>Servizio macOS</dt><dd id="hostState">non verificato</dd></div></dl><div class="actions"><button id="copyDiagnostics" class="secondary">Copia diagnostica</button><button id="reloadExtension" class="secondary">Ricarica estensione</button></div><p class="hint">All'avvio il registro sul My Cloud viene letto e la timeline avanza automaticamente fino all'ultimo ID completato.</p></section>
+  <details><summary>Posso usare il Mac?</summary><p>Puoi usare altre app e schede. Non chiudere, ricaricare o usare la scheda Google Foto automatizzata e non mettere il Mac in stop.</p></details>
+</main><script src="planner.js"></script><script src="sidepanel.js"></script></body></html>

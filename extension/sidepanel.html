@@ -1,0 +1,10 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>GPhoto2MyCloud</title><link rel="stylesheet" href="sidepanel.css"></head>
+<body><main>
+  <header><div class="mark">G</div><div><h1>GPhoto2MyCloud</h1><p>Google Foto → My Cloud</p></div></header>
+  <section class="status"><span id="dot"></span><div><strong id="phase">Pronto</strong><p id="message">Apri photos.google.com per iniziare.</p></div></section>
+  <section><h2>Percorsi</h2><label>Destinazione SMB montata<input id="destination" value="/Volumes/MyCloud/GooglePhotos"></label><label>Cartella download di Chrome<input id="downloadRoot" value="~/Downloads"></label><button id="check" class="secondary">Verifica disco</button><p id="disk"></p></section>
+  <section><h2>Download</h2><div class="grid"><label>Foto per lotto<input id="batchSize" type="number" min="1" max="500" value="250"></label><label>Pausa click (ms)<input id="clickDelayMs" type="number" min="100" max="3000" value="350"></label><label>Attesa griglia (s)<input id="settleSeconds" type="number" min="2" max="120" value="8"></label></div><label class="toggle"><input id="verifyCopies" type="checkbox" checked> Verifica SHA-256 dopo ogni copia</label></section>
+  <div class="actions"><button id="start">Avvia / riprendi</button><button id="stop" class="danger" disabled>Interrompi</button></div><button id="reset" class="secondary full">Nuovo backup: azzera registro elementi</button>
+  <details><summary>Posso usare il Mac?</summary><p>Sì: puoi usare altre app e altre schede. Non chiudere, ricaricare o usare la scheda Google Foto automatizzata e non mettere il Mac in stop. In background la scansione può essere più lenta.</p></details><details><summary>Come funziona</summary><p>L'app identifica ogni foto con l'ID stabile del link, seleziona lotti nella griglia, invia il comando reale ⇧D, attende il download, copia il risultato sul volume SMB e registra gli ID solo dopo la verifica.</p></details>
+  <pre id="log"></pre>
+</main><script src="planner.js"></script><script src="sidepanel.js"></script></body></html>

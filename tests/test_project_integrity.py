@@ -9,7 +9,7 @@ ROOT = Path(__file__).parents[1]
 class ProjectIntegrityTests(unittest.TestCase):
     def test_manifest_references_current_ui_and_scripts(self):
         manifest = json.loads((ROOT / "extension/manifest.json").read_text())
-        self.assertEqual(manifest["version"], "2.1.0")
+        self.assertEqual(manifest["version"], "3.0.0")
         referenced = [manifest["side_panel"]["default_path"], manifest["background"]["service_worker"]]
         referenced.extend(manifest["content_scripts"][0]["js"])
         for relative in referenced:
@@ -23,6 +23,8 @@ class ProjectIntegrityTests(unittest.TestCase):
     def test_installer_and_manifest_use_same_fixed_extension_id(self):
         installer = (ROOT / "macos/Installa.command").read_text()
         self.assertIn("mocnnikkncmfihikmbkhlmhkjegjmime", installer)
+        self.assertIn("update_chrome_extension.py", installer)
+        self.assertIn("--load-extension", installer)
 
 
 if __name__ == "__main__":

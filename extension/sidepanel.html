@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>GPhoto2MyCloud</title><link rel="stylesheet" href="sidepanel.css"></head>
 <body><main>
-  <header><div class="mark">G</div><div><h1>GPhoto2MyCloud</h1><p>Centro backup macOS <span id="version">v…</span></p></div><span id="runBadge" class="badge">PRONTO</span></header>
+  <header><div class="mark">G</div><div><h1>GPhoto2MyCloud</h1><p>Production build <span id="version">v…</span></p></div><span id="runBadge" class="badge">PRONTO</span></header>
 
   <nav class="pipeline" aria-label="Fasi del backup"><span class="current">1 Selezione</span><i>›</i><span>2 Download</span><i>›</i><span>3 Estrazione</span><i>›</i><span>4 Verifica</span></nav>
 
@@ -19,6 +19,6 @@
   <div class="actions"><button id="start">▶ Avvia / riprendi</button><button id="stop" class="danger" disabled>■ Interrompi</button></div><button id="reset" class="secondary full">Azzera registro e avvia un nuovo backup</button>
 
   <section class="log-section"><div class="log-heading"><h2>03 · Registro attività</h2><button id="clearLog" class="text-button">Pulisci</button></div><div class="log-columns"><span>Ora</span><span>Livello</span><span>Evento e dettagli</span></div><div id="log" role="log" aria-live="polite"><div class="empty-log">Gli eventi dettagliati appariranno qui.</div></div></section>
-  <section class="diagnostics"><h2>04 · Diagnostica installazione</h2><dl><div><dt>Versione caricata</dt><dd id="diagnosticVersion">—</dd></div><div><dt>ID estensione</dt><dd id="extensionId">—</dd></div><div><dt>Servizio macOS</dt><dd id="hostState">non verificato</dd></div></dl><div class="actions"><button id="copyDiagnostics" class="secondary">Copia diagnostica</button><button id="reloadExtension" class="secondary">Ricarica estensione</button></div><p class="hint">Se il pannello appare ancora vecchio, premi “Ricarica estensione”: il pannello si chiuderà e alla riapertura mostrerà questa versione.</p></section>
+  <section class="diagnostics"><h2>04 · Diagnostica installazione</h2><dl><div><dt>Versione caricata</dt><dd id="diagnosticVersion">—</dd></div><div><dt>Canale</dt><dd>Production 3</dd></div><div><dt>ID estensione</dt><dd id="extensionId">—</dd></div><div><dt>Servizio macOS</dt><dd id="hostState">non verificato</dd></div></dl><div class="actions"><button id="copyDiagnostics" class="secondary">Copia diagnostica</button><button id="reloadExtension" class="secondary">Ricarica estensione</button></div><p class="hint">Installazione gestita da Installa.command: la cartella caricata da Chrome viene aggiornata e Chrome viene riavviato automaticamente.</p></section>
   <details><summary>Posso usare il Mac?</summary><p>Puoi usare altre app e schede. Non chiudere, ricaricare o usare la scheda Google Foto automatizzata e non mettere il Mac in stop.</p></details>
 </main><script src="planner.js"></script><script src="sidepanel.js"></script></body></html>

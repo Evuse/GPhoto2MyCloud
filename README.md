@@ -50,20 +50,20 @@ Requisiti: macOS, Google Chrome, Python 3 di sistema o installato e My Cloud gi�
 montato via SMB (ad esempio `/Volumes/MyCloud`).
 
 1. Fare doppio clic su `macos/Installa.command`. macOS può richiedere **Apri** dal
-   menu contestuale la prima volta.
-2. Nella pagina Chrome aperta, abilitare **Modalità sviluppatore**, scegliere
-   **Carica estensione non pacchettizzata** e indicare la cartella `extension/`.
-3. Aprire `https://photos.google.com/` nel profilo Chrome già autenticato.
-4. Premere l'icona GPhoto2MyCloud, impostare ad esempio
+   menu contestuale la prima volta. L'installer chiude Chrome in modo controllato,
+   installa una copia stabile, aggiorna l'eventuale profilo che puntava alla vecchia
+   cartella, verifica versione e hash, quindi riapre Chrome e Google Foto.
+2. Solo se Chrome mostra per la prima volta la richiesta relativa a un'estensione
+   unpacked, confermarne il caricamento. Non occorre scegliere manualmente una cartella.
+3. Premere l'icona GPhoto2MyCloud, impostare ad esempio
    `/Volumes/MyCloud/GooglePhotos` e premere **Verifica disco**.
-5. Premere **Avvia backup** e lasciare la scheda aperta.
+4. Premere **Avvia backup** e lasciare la scheda aperta.
 
-> Dopo ogni aggiornamento del progetto è necessario premere **Ricarica** sulla scheda
-> dell'estensione in `chrome://extensions`. Chrome mantiene in memoria la versione
-> precedentemente caricata: copiare i file non ricarica automaticamente un'estensione
-> unpacked. Il nuovo pannello mostra chiaramente `v2.1.0`, la pipeline in quattro fasi
-> e la sezione **04 · Diagnostica installazione**. Se questi elementi non compaiono,
-> Chrome sta ancora eseguendo i file vecchi.
+> La release finale mostra **v3.0.0** e **FINAL-PROD-3**. L'installer non si limita più
+> a copiare il Native Host: installa l'intera estensione sotto
+> `~/Library/Application Support/GPhoto2MyCloud/extension-production`, aggiorna il
+> riferimento del profilo Chrome e riavvia Chrome con quella directory. Se compaiono
+> ancora `2.0` o `2.1`, non è stata eseguita questa versione di `Installa.command`.
 
 ### Posso usare il Mac nel frattempo?
 
@@ -126,8 +126,9 @@ python3 -m py_compile native-host/gphoto2mycloud_host.py
 
 ### Limiti noti
 
-- La prima installazione richiede il caricamento esplicito dell'estensione; per
-  eliminarlo occorre pubblicare e firmare l'estensione sul Chrome Web Store.
+- Chrome può mostrare una conferma di sicurezza al primissimo caricamento di
+  un'estensione non pubblicata; gli aggiornamenti successivi sono gestiti
+  dall'installer nella directory stabile.
 - Il download multiplo prodotto da Google è normalmente uno ZIP: viene estratto sul
   NAS. La conservazione aggiuntiva dello ZIP in `Archives` è opzionale nella GUI.
 - La scansione dipende dalla struttura accessibile della griglia Google Foto. Se

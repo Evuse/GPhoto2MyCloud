@@ -1,0 +1,13 @@
+[gphoto2mycloud]
+# Cartella Google Drive creata da Takeout, configurata in rclone.
+source = "gdrive:Takeout"
+source_mode = "rclone"
+
+# Percorso del volume My Cloud montato sull'host/container.
+destination = "/mnt/mycloud/GooglePhotos"
+work_dir = "/var/lib/gphoto2mycloud"
+
+# Conservare gli archivi originali è la garanzia più forte contro ogni perdita.
+retain_archives = true
+poll_seconds = 21600
+

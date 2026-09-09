@@ -26,34 +26,36 @@ function nativeMessage(payload) {
   });
 }
 
-async function dispatchShiftD(tabId) {
+async function ensureDebugger(tabId) {
   const target = {tabId};
-  await chrome.debugger.attach(target, "1.3");
-  try {
+  const targets = await chrome.debugger.getTargets();
+  if (!targets.some(item => item.tabId === tabId && item.attached)) {
+    await chrome.debugger.attach(target, "1.3");
+  }
+  await chrome.debugger.sendCommand(target, "Emulation.setFocusEmulationEnabled", {enabled: true});
+  await chrome.debugger.sendCommand(target, "Emulation.setIdleOverride", {isUserActive: true, isScreenUnlocked: true});
+  await chrome.debugger.sendCommand(target, "Page.setWebLifecycleState", {state: "active"}).catch(() => {});
+  return target;
+}
+
+async function dispatchShiftD(tabId) {
+  const target = await ensureDebugger(tabId);
     await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
       type: "keyDown", key: "D", code: "KeyD", modifiers: 8, windowsVirtualKeyCode: 68
     });
     await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
       type: "keyUp", key: "D", code: "KeyD", modifiers: 8, windowsVirtualKeyCode: 68
     });
-  } finally {
-    await chrome.debugger.detach(target).catch(() => {});
-  }
 }
 
 async function dispatchEscape(tabId) {
-  const target = {tabId};
-  await chrome.debugger.attach(target, "1.3");
-  try {
+  const target = await ensureDebugger(tabId);
     await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
       type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27
     });
     await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
       type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27
     });
-  } finally {
-    await chrome.debugger.detach(target).catch(() => {});
-  }
 }
 
 chrome.downloads.onCreated.addListener(async item => {
@@ -85,7 +87,6 @@ chrome.downloads.onChanged.addListener(async delta => {
       chrome.runtime.sendMessage({type:"progress-ui",phase:"extracting",phaseLabel:"Estrazione sul My Cloud",message:"Download completo, estrazione e verifica in corso",processPercent:72,batchPercent:0,batchLabel:"Estrazione file",detail:item.filename.split("/").pop()}).catch(()=>{});
       const moved = await nativeMessage({
         command: "move", source: item.filename, destination: job.settings.destination,
-        downloadRoot: job.settings.downloadRoot,
         extractedFolder: job.settings.extractedFolder,
         keepArchives: job.settings.keepArchives,
         photoIds: job.photoIds,
@@ -110,6 +111,26 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     nativeMessage({command: "status", destination: message.destination}).then(respond, error => respond({ok: false, error: error.message}));
     return true;
   }
+  if (message.type === "prepareAutomation") {
+    if (!sender.tab?.id) { respond({ok: false, error: "Scheda non disponibile"}); return; }
+    ensureDebugger(sender.tab.id).then(() => respond({ok: true}), error => respond({ok: false, error: error.message}));
+    return true;
+  }
+  if (message.type === "releaseAutomation") {
+    if (sender.tab?.id) chrome.debugger.detach({tabId: sender.tab.id}).catch(() => {});
+    respond({ok: true});
+    return;
+  }
+  if (message.type === "trustedClick") {
+    if (!sender.tab?.id) { respond({ok: false, error: "Scheda non disponibile"}); return; }
+    ensureDebugger(sender.tab.id).then(async target => {
+      const modifiers = message.shift ? 8 : 0;
+      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {type: "mousePressed", x: message.x, y: message.y, button: "left", clickCount: 1, modifiers});
+      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {type: "mouseReleased", x: message.x, y: message.y, button: "left", clickCount: 1, modifiers});
+      respond({ok: true});
+    }, error => respond({ok: false, error: error.message}));
+    return true;
+  }
   if (message.type === "clearSelection") {
     if (!sender.tab?.id) { respond({ok: false}); return; }
     dispatchEscape(sender.tab.id).then(() => respond({ok: true}), error => respond({ok: false, error: error.message}));
@@ -120,7 +141,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!tabId) { respond({ok: false, error: "Scheda Google Foto non disponibile"}); return; }
     getJob().then(async existing => {
       if (existing) throw new Error("Lotto già attivo");
-      await setJob({tabId, settings: message.settings, photoIds: message.photoIds, downloadId: null, startedAt: Date.now() - 1000});
+      const prepared = await nativeMessage({command: "prepare", destination: message.settings.destination});
+      const target = await ensureDebugger(tabId);
+      await chrome.debugger.sendCommand(target, "Browser.setDownloadBehavior", {behavior: "allow", downloadPath: prepared.downloadPath, eventsEnabled: true});
+      await setJob({tabId, settings: message.settings, photoIds: message.photoIds, downloadPath: prepared.downloadPath, downloadId: null, startedAt: Date.now() - 1000});
       await dispatchShiftD(tabId);
       respond({ok: true});
     }).catch(async error => {

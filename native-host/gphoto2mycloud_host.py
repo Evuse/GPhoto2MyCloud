@@ -116,12 +116,18 @@ def handle(message: dict) -> dict:
     if message.get("command") == "status":
         free = shutil.disk_usage(destination).free
         return {"ok": True, "freeBytes": free, "freeHuman": f"{free / 1024**3:.1f} GB"}
+    incoming = destination / ".gphoto2mycloud-incoming"
+    if message.get("command") == "prepare":
+        incoming.mkdir(parents=True, exist_ok=True)
+        if not os.access(incoming, os.W_OK):
+            raise PermissionError(f"Cartella temporanea non scrivibile: {incoming}")
+        return {"ok": True, "downloadPath": str(incoming)}
     if message.get("command") != "move":
         raise ValueError("Comando sconosciuto")
     source = Path(str(message.get("source", ""))).resolve()
-    downloads = Path(str(message.get("downloadRoot", "~/Downloads"))).expanduser().resolve()
-    if not source.is_file() or (downloads not in source.parents and source.parent != downloads):
-        raise ValueError(f"Il file restituito da Chrome non è sotto {downloads}")
+    incoming = incoming.resolve()
+    if not source.is_file() or (incoming not in source.parents and source.parent != incoming):
+        raise ValueError(f"Chrome non ha scritto il file direttamente sul My Cloud: {source}")
     folder = safe_relative(str(message.get("extractedFolder", "Media")))
     media = destination / folder
     media.mkdir(parents=True, exist_ok=True)

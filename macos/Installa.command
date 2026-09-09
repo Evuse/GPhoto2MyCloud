@@ -6,6 +6,7 @@ APP_SUPPORT="$HOME/Library/Application Support/GPhoto2MyCloud"
 CHROME_ROOT="$HOME/Library/Application Support/Google/Chrome"
 HOSTS="$CHROME_ROOT/NativeMessagingHosts"
 EXTENSION_DEST="$APP_SUPPORT/extension-production"
+LAUNCHER="$APP_SUPPORT/Avvia-GPhoto2MyCloud.command"
 VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/extension/manifest.json")"
 
 echo "GPhoto2MyCloud Production $VERSION"
@@ -43,13 +44,29 @@ fi
 
 echo "Installazione verificata:"
 echo "  versione: $INSTALLED_VERSION"
-echo "  build: FINAL-PROD-3"
+echo "  build: FINAL-PROD-3.1-DIRECT-NAS"
 echo "  estensione: $EXTENSION_DEST"
 echo "  profili aggiornati: $UPDATE_RESULT"
 echo -n "  SHA-256 pannello: "
 shasum -a 256 "$EXTENSION_DEST/sidepanel.html" | cut -d' ' -f1
 
-echo "Riavvio Chrome con la build di produzione…"
-open -na "Google Chrome" --args --load-extension="$EXTENSION_DEST" "https://photos.google.com/"
-echo "Fatto. Il pannello deve mostrare v$VERSION e FINAL-PROD-3."
+cat > "$LAUNCHER" <<LAUNCHER_SCRIPT
+#!/bin/bash
+osascript -e 'tell application "Google Chrome" to quit' 2>/dev/null || true
+while pgrep -x "Google Chrome" >/dev/null; do sleep 1; done
+open -na "Google Chrome" --args \\
+  --load-extension="$EXTENSION_DEST" \
+  --disable-background-timer-throttling \
+  --disable-backgrounding-occluded-windows \
+  --disable-renderer-backgrounding \
+  "https://photos.google.com/"
+LAUNCHER_SCRIPT
+chmod 755 "$LAUNCHER"
+mkdir -p "$HOME/Applications"
+rm -rf "$HOME/Applications/GPhoto2MyCloud.app"
+osacompile -o "$HOME/Applications/GPhoto2MyCloud.app" -e "do shell script quoted form of \"$LAUNCHER\""
+
+echo "Riavvio Chrome tramite GPhoto2MyCloud.app…"
+"$LAUNCHER"
+echo "Fatto. Il pannello deve mostrare v$VERSION e FINAL-PROD-3.1-DIRECT-NAS."
 sleep 4

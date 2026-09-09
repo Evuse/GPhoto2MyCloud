@@ -70,22 +70,45 @@
     return [...result.values()];
   }
 
+  function visibleProcessedItems() {
+    return [...document.querySelectorAll('a[href*="/photo/"]')]
+      .some(link => processed.has(GPhotoPlanner.photoId(link.href, location.href)));
+  }
+
+  async function trustedClick(checkbox, shift) {
+    const box = checkbox.getBoundingClientRect();
+    const response = await chrome.runtime.sendMessage({
+      type: "trustedClick", x: box.left + box.width / 2, y: box.top + box.height / 2, shift
+    });
+    if (!response?.ok) throw new Error(response?.error || "Click Chrome non riuscito");
+    await sleep(shift ? Math.max(500, settingsForClickDelay) : settingsForClickDelay);
+  }
+
+  let settingsForClickDelay = 350;
+
   async function selectBatch(settings) {
     selected = [];
+    settingsForClickDelay = settings.clickDelayMs;
     let bottomChecks = 0;
     while (!stopped && selected.length < settings.batchSize && bottomChecks < 5) {
       const candidates = visiblePhotoCheckboxes().filter(item => !selected.some(value => value.id === item.id));
-      for (const item of candidates) {
+      const room = settings.batchSize - selected.length;
+      const pageItems = candidates.slice(0, room);
+      const fastRange = settings.rangeSelection && pageItems.length > 1 && !visibleProcessedItems();
+      if (fastRange) {
+        if (!selected.length) await trustedClick(pageItems[0].checkbox, false);
+        await trustedClick(pageItems.at(-1).checkbox, true);
+      }
+      for (const item of pageItems) {
         if (selected.length >= settings.batchSize || stopped) break;
-        item.checkbox.click();
-        await sleep(settings.clickDelayMs);
+        if (item.checkbox.getAttribute("aria-checked") !== "true") await trustedClick(item.checkbox, false);
         if (item.checkbox.getAttribute("aria-checked") === "true") {
           selected.push(item);
           report("selecting", `Selezionato elemento ${selected.length} del lotto`, {
             phaseLabel: "Selezione dalla timeline", selected: selected.length,
             batchPercent: selected.length / settings.batchSize * 100,
             batchLabel: `Lotto: ${selected.length} / ${settings.batchSize}`,
-            detail: `ID ${item.id} · ${processed.size} già archiviati`
+            detail: `ID ${item.id} · ${processed.size} già archiviati · ${fastRange?"Maiusc+click":"click singolo"}`
           });
         }
       }
@@ -131,10 +154,12 @@
     observed = new Set();
     processed = new Set((await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || []);
     const settings = GPhotoPlanner.clampSettings(rawSettings);
-    rewindTimeline();
-    await sleep(settings.settleSeconds * 1000);
-    report("starting", "Scansione della timeline dall'inizio", {phaseLabel:"Preparazione",batchPercent:0,batchLabel:"Lotto non ancora iniziato",detail:`Registro: ${processed.size} elementi già completati`});
     try {
+      const prepared = await chrome.runtime.sendMessage({type:"prepareAutomation"});
+      if (!prepared?.ok) throw new Error(prepared?.error || "Impossibile mantenere attiva la scheda Google Foto");
+      rewindTimeline();
+      await sleep(settings.settleSeconds * 1000);
+      report("starting", "Scansione della timeline dall'inizio", {phaseLabel:"Preparazione",batchPercent:0,batchLabel:"Lotto non ancora iniziato",detail:`Registro: ${processed.size} elementi già completati · modalità focus in background attiva`});
       while (!stopped) {
         const batch = await selectBatch(settings);
         if (!batch.length) {
@@ -158,6 +183,7 @@
       await clearSelection();
     } finally {
       running = false;
+      await chrome.runtime.sendMessage({type:"releaseAutomation"}).catch(()=>{});
     }
   }
 

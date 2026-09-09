@@ -2,6 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 
 from native_host import digest, extract_download, handle, safe_relative, unique_target
 
@@ -18,6 +19,22 @@ class NativeHostTests(unittest.TestCase):
     def test_status_rejects_unmounted_destination(self):
         with self.assertRaisesRegex(ValueError, "sotto /Volumes"):
             handle({"command": "status", "destination": "/tmp/photos"})
+
+    def test_move_rejects_files_not_downloaded_directly_to_mycloud(self):
+        with tempfile.TemporaryDirectory() as raw:
+            source = Path(raw) / "local.zip"
+            source.write_bytes(b"local")
+            with patch("native_host.module.mounted_destination", return_value=Path(raw) / "nas"):
+                with self.assertRaisesRegex(ValueError, "direttamente sul My Cloud"):
+                    handle({"command": "move", "destination": "/Volumes/MyCloud", "source": str(source)})
+
+    def test_prepare_creates_incoming_directory_on_nas(self):
+        with tempfile.TemporaryDirectory() as raw:
+            destination = Path(raw) / "GooglePhotos"
+            with patch("native_host.module.mounted_destination", return_value=destination):
+                result = handle({"command": "prepare", "destination": "/Volumes/MyCloud/GooglePhotos"})
+            self.assertEqual(result["downloadPath"], str(destination / ".gphoto2mycloud-incoming"))
+            self.assertTrue(Path(result["downloadPath"]).is_dir())
 
     def test_extracts_zip_into_one_media_tree_and_deduplicates_identical_files(self):
         with tempfile.TemporaryDirectory() as raw:

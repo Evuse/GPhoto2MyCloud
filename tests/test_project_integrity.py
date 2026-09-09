@@ -9,7 +9,7 @@ ROOT = Path(__file__).parents[1]
 class ProjectIntegrityTests(unittest.TestCase):
     def test_manifest_references_current_ui_and_scripts(self):
         manifest = json.loads((ROOT / "extension/manifest.json").read_text())
-        self.assertEqual(manifest["version"], "3.0.0")
+        self.assertEqual(manifest["version"], "3.1.0")
         referenced = [manifest["side_panel"]["default_path"], manifest["background"]["service_worker"]]
         referenced.extend(manifest["content_scripts"][0]["js"])
         for relative in referenced:
@@ -25,6 +25,8 @@ class ProjectIntegrityTests(unittest.TestCase):
         self.assertIn("mocnnikkncmfihikmbkhlmhkjegjmime", installer)
         self.assertIn("update_chrome_extension.py", installer)
         self.assertIn("--load-extension", installer)
+        self.assertIn("--disable-background-timer-throttling", installer)
+        self.assertIn("--disable-renderer-backgrounding", installer)
 
 
 if __name__ == "__main__":

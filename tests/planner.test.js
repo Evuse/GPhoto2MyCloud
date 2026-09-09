@@ -4,8 +4,8 @@ const {clampSettings, downloadState, photoId} = require("../extension/planner.js
 
 test("settings have safe defaults", () => {
   assert.deepEqual(clampSettings(), {
-    destination: "/Volumes/MyCloud/GooglePhotos", downloadRoot: "~/Downloads",
-    extractedFolder: "Media", keepArchives: false, batchSize: 250,
+    destination: "/Volumes/MyCloud/GooglePhotos", extractedFolder: "Media",
+    keepArchives: false, rangeSelection: true, batchSize: 250,
     clickDelayMs: 350, settleSeconds: 8, verifyCopies: true
   });
 });

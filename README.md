@@ -2,7 +2,8 @@
 
 Applicazione grafica per pilotare **la sessione Google Foto già aperta in Chrome**:
 seleziona le foto in lotti lungo l'intera timeline, invia a Chrome il vero comando
-**⇧D**, segue il download ed estrae i file nella cartella `Media` del volume My Cloud.
+**⇧D** e configura Chrome perché scriva lo ZIP direttamente sul volume My Cloud;
+l'archivio viene poi estratto nella cartella `Media` sullo stesso volume.
 
 ![Architettura](https://img.shields.io/badge/macOS-Chrome%20Extension%20%2B%20Native%20Host-4285F4)
 
@@ -31,7 +32,7 @@ Il pannello laterale di Chrome è la GUI macOS dell'app e mostra:
 
 - fase corrente, messaggio e contatore della selezione;
 - due barre grafiche separate per la fase del processo e il lotto/download corrente;
-- percorso del volume SMB, cartella download di Chrome e spazio disponibile;
+- percorso del volume SMB, area temporanea diretta sul NAS e spazio disponibile;
 - nome della cartella unica che raccoglie tutti i file estratti;
 - dimensione dei lotti, ritardo tra click e attesa di caricamento della griglia;
 - attivazione/disattivazione della verifica SHA-256;
@@ -59,7 +60,11 @@ montato via SMB (ad esempio `/Volumes/MyCloud`).
    `/Volumes/MyCloud/GooglePhotos` e premere **Verifica disco**.
 4. Premere **Avvia backup** e lasciare la scheda aperta.
 
-> La release finale mostra **v3.0.0** e **FINAL-PROD-3**. L'installer non si limita più
+L'installer crea anche `~/Applications/GPhoto2MyCloud.app`. Per le esecuzioni future
+avviare questa app: riapre Chrome con le opzioni necessarie a impedire la sospensione
+della timeline quando si lavora in un'altra scheda o applicazione.
+
+> La release finale mostra **v3.1.0** e **FINAL-PROD-3.1-DIRECT-NAS**. L'installer non si limita più
 > a copiare il Native Host: installa l'intera estensione sotto
 > `~/Library/Application Support/GPhoto2MyCloud/extension-production`, aggiorna il
 > riferimento del profilo Chrome e riavvia Chrome con quella directory. Se compaiono
@@ -68,40 +73,46 @@ montato via SMB (ad esempio `/Volumes/MyCloud`).
 ### Posso usare il Mac nel frattempo?
 
 Sì. La scheda Google Foto **non deve essere quella attiva**: si possono usare altre
-schede e altre applicazioni. Non bisogna però interagire con quella specifica scheda,
-ricaricarla, chiuderla, minimizzare/chiudere completamente Chrome o mettere il Mac in
-stop. Chrome rallenta i timer delle schede in background, quindi la scansione può
-procedere più lentamente. L'invio ⇧D è diretto alla scheda corretta tramite il suo ID,
-non alla finestra che si sta usando.
+schede e altre applicazioni. L'estensione mantiene aperta una sessione DevTools per
+l'intera esecuzione e abilita focus emulato, stato pagina attivo e utente non inattivo,
+mentre l'installer avvia Chrome disabilitando il throttling dei renderer e dei timer
+in background. In questo modo la scansione continua anche cambiando scheda. Non bisogna comunque
+ricaricare o chiudere la scheda automatizzata, chiudere Chrome o mettere il Mac in stop.
 
-L'installazione manuale dell'estensione è un vincolo di sicurezza imposto da Chrome
-alle estensioni non pubblicate sul Chrome Web Store. Non sono necessarie API Google,
-OAuth aggiuntivo o configurazioni Google Cloud.
+L'eventuale conferma al primo avvio è un vincolo di sicurezza imposto da Chrome alle
+estensioni non pubblicate sul Chrome Web Store. Non sono necessarie API Google, OAuth
+aggiuntivo o configurazioni Google Cloud.
 
 ## Flusso e sicurezza dei dati
 
 1. Il content script estrae l'identificativo stabile dal link `/photo/<id>`, deduplica
    gli ID e considera esclusivamente checkbox appartenenti alle relative tessere.
-2. Seleziona lentamente fino alla dimensione del lotto configurata.
+2. Se la modalità rapida è attiva, clicca il primo elemento visibile e usa un vero
+   **Maiusc+click** sull'ultimo: Google Foto seleziona l'intervallo. Verifica ogni
+   checkbox e usa click singoli solo come fallback o in presenza di elementi già fatti.
 3. Il service worker usa il protocollo Chrome DevTools per generare un evento ⇧D
    attendibile; Chrome mostra l'avviso standard mentre il debugger è collegato.
-4. L'app aspetta che `chrome.downloads` dichiari il file completo.
-5. Il servizio nativo accetta sorgenti solo dalla cartella Download configurata e
+4. Prima di ⇧D crea `.gphoto2mycloud-incoming` sul NAS e usa
+   `Browser.setDownloadBehavior` per far scrivere a Chrome il download direttamente
+   lì. Lo ZIP non viene prima salvato sul disco interno del Mac.
+5. L'app aspetta che `chrome.downloads` dichiari il file completo.
+6. Il servizio nativo accetta sorgenti soltanto dall'area incoming del My Cloud e
    destinazioni solo sotto `/Volumes`.
-6. Estrae lo ZIP in una directory temporanea direttamente sul My Cloud, blocca path
+7. Estrae lo ZIP in una directory temporanea direttamente sul My Cloud, blocca path
    traversal e symlink, forza il flush e verifica SHA-256 di ogni file estratto.
-7. Pubblica tutti i file sotto l'unica cartella configurata (`Media` di default). I
+8. Pubblica tutti i file sotto l'unica cartella configurata (`Media` di default). I
    nomi originali non vengono mai modificati: un file identico viene deduplicato;
    un omonimo differente conserva il nome ed è separato sotto `_conflitti/<hash>/`.
-8. Registra nome, byte, data e SHA-256 in
+9. Registra nome, byte, data e SHA-256 in
    `.gphoto2mycloud-history.jsonl` sul My Cloud.
-9. Soltanto dopo la copia verificata registra gli ID del lotto nel profilo Chrome;
+10. Soltanto dopo la copia verificata registra gli ID del lotto nel profilo Chrome;
    un riavvio riparte dall'inizio della griglia e salta esattamente quegli ID.
-10. Se lo ZIP contiene meno file degli elementi selezionati, il lotto viene rifiutato
+11. Se lo ZIP contiene meno file degli elementi selezionati, il lotto viene rifiutato
     e non viene marcato completato (più file sono ammessi, ad esempio per Live Photo).
 
 Se il NAS viene disconnesso, l'hash non coincide o Chrome non avvia il download,
-l'operazione si ferma e il file originale in Download viene lasciato intatto.
+l'operazione si ferma e l'eventuale ZIP resta nell'area incoming del My Cloud; non
+viene creata alcuna copia temporanea nel disco interno del Mac.
 
 ## Permessi richiesti
 

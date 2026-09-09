@@ -6,6 +6,8 @@
     return {
       destination: String(input.destination || "/Volumes/MyCloud/GooglePhotos"),
       downloadRoot: String(input.downloadRoot || "~/Downloads"),
+      extractedFolder: String(input.extractedFolder || "Media"),
+      keepArchives: input.keepArchives === true,
       batchSize: Math.min(500, Math.max(1, Number(input.batchSize) || 250)),
       clickDelayMs: Math.min(3000, Math.max(100, Number(input.clickDelayMs) || 350)),
       settleSeconds: Math.min(120, Math.max(2, Number(input.settleSeconds) || 8)),

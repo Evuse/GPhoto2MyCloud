@@ -1,8 +1,8 @@
 # GPhoto2MyCloud per macOS
 
 Applicazione grafica per pilotare **la sessione Google Foto già aperta in Chrome**:
-seleziona le foto visibili in lotti, invia a Chrome il vero comando **⇧D**, segue il
-download e trasferisce il risultato sul volume My Cloud già montato in `/Volumes`.
+seleziona le foto in lotti lungo l'intera timeline, invia a Chrome il vero comando
+**⇧D**, segue il download ed estrae i file nella cartella `Media` del volume My Cloud.
 
 ![Architettura](https://img.shields.io/badge/macOS-Chrome%20Extension%20%2B%20Native%20Host-4285F4)
 
@@ -31,6 +31,7 @@ Il pannello laterale di Chrome è la GUI macOS dell'app e mostra:
 
 - fase corrente, messaggio e contatore della selezione;
 - percorso del volume SMB, cartella download di Chrome e spazio disponibile;
+- nome della cartella unica che raccoglie tutti i file estratti;
 - dimensione dei lotti, ritardo tra click e attesa di caricamento della griglia;
 - attivazione/disattivazione della verifica SHA-256;
 - comandi **Avvia backup** e **Interrompi**;
@@ -78,13 +79,16 @@ OAuth aggiuntivo o configurazioni Google Cloud.
 4. L'app aspetta che `chrome.downloads` dichiari il file completo.
 5. Il servizio nativo accetta sorgenti solo dalla cartella Download configurata e
    destinazioni solo sotto `/Volumes`.
-6. Copia in un file `.gphoto2mycloud-partial`, forza il flush sul disco, confronta
-   SHA-256 sorgente/destinazione e solo dopo pubblica il file e rimuove la sorgente.
-7. Non sovrascrive mai: in caso di omonimia aggiunge un numero progressivo.
+6. Estrae lo ZIP in una directory temporanea direttamente sul My Cloud, blocca path
+   traversal e symlink, forza il flush e verifica SHA-256 di ogni file estratto.
+7. Pubblica tutti i file sotto l'unica cartella configurata (`Media` di default). Non
+   sovrascrive: un file identico viene deduplicato, uno omonimo ma diverso rinominato.
 8. Registra nome, byte, data e SHA-256 in
    `.gphoto2mycloud-history.jsonl` sul My Cloud.
 9. Soltanto dopo la copia verificata registra gli ID del lotto nel profilo Chrome;
    un riavvio riparte dall'inizio della griglia e salta esattamente quegli ID.
+10. Se lo ZIP contiene meno file degli elementi selezionati, il lotto viene rifiutato
+    e non viene marcato completato (più file sono ammessi, ad esempio per Live Photo).
 
 Se il NAS viene disconnesso, l'hash non coincide o Chrome non avvia il download,
 l'operazione si ferma e il file originale in Download viene lasciato intatto.
@@ -114,8 +118,8 @@ python3 -m py_compile native-host/gphoto2mycloud_host.py
 
 - La prima installazione richiede il caricamento esplicito dell'estensione; per
   eliminarlo occorre pubblicare e firmare l'estensione sul Chrome Web Store.
-- Il download multiplo prodotto da Google è normalmente uno ZIP; l'app lo conserva
-  tale e quale, evitando qualsiasi trasformazione.
+- Il download multiplo prodotto da Google è normalmente uno ZIP: viene estratto sul
+  NAS. La conservazione aggiuntiva dello ZIP in `Archives` è opzionale nella GUI.
 - La scansione dipende dalla struttura accessibile della griglia Google Foto. Se
   Google la modifica, l'app fallisce esplicitamente e il selettore va aggiornato.
 - Non è tecnicamente possibile confrontare gli ID trovati con un conteggio ufficiale

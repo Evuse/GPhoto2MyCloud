@@ -80,6 +80,8 @@ chrome.downloads.onChanged.addListener(async delta => {
       const moved = await nativeMessage({
         command: "move", source: item.filename, destination: job.settings.destination,
         downloadRoot: job.settings.downloadRoot,
+        extractedFolder: job.settings.extractedFolder,
+        keepArchives: job.settings.keepArchives,
         photoIds: job.photoIds,
         verify: job.settings.verifyCopies
       });

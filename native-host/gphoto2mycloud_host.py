@@ -10,6 +10,8 @@ import shutil
 import struct
 import sys
 import time
+import uuid
+import zipfile
 
 
 def digest(path: Path) -> str:
@@ -27,6 +29,61 @@ def unique_target(folder: Path, name: str) -> Path:
         candidate = folder / f"{Path(name).stem}-{counter}{Path(name).suffix}"
         counter += 1
     return candidate
+
+
+def safe_relative(name: str) -> Path:
+    relative = Path(name.replace("\\", "/"))
+    if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+        raise ValueError(f"Percorso non sicuro nello ZIP: {name}")
+    return relative
+
+
+def publish_file(source: Path, target: Path, verify: bool) -> tuple[Path, str | None]:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        if source.stat().st_size == target.stat().st_size and digest(source) == digest(target):
+            source.unlink()
+            return target, digest(target) if verify else None
+        target = unique_target(target.parent, target.name)
+    checksum = digest(source) if verify else None
+    os.replace(source, target)
+    if verify and digest(target) != checksum:
+        raise OSError(f"Verifica SHA-256 fallita: {target.name}")
+    return target, checksum
+
+
+def extract_download(source: Path, media: Path, verify: bool) -> list[dict]:
+    staging = media.parent / f".gphoto2mycloud-{uuid.uuid4().hex}"
+    staging.mkdir(parents=True)
+    extracted: list[dict] = []
+    try:
+        if zipfile.is_zipfile(source):
+            with zipfile.ZipFile(source) as archive:
+                for member in archive.infolist():
+                    relative = safe_relative(member.filename)
+                    if member.is_dir():
+                        continue
+                    if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                        raise ValueError(f"Link simbolico non consentito: {member.filename}")
+                    temporary = staging / relative
+                    temporary.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(member) as reader, temporary.open("xb") as writer:
+                        shutil.copyfileobj(reader, writer, 4 * 1024 * 1024)
+                        writer.flush()
+                        os.fsync(writer.fileno())
+        else:
+            temporary = staging / safe_relative(source.name)
+            with source.open("rb") as reader, temporary.open("xb") as writer:
+                shutil.copyfileobj(reader, writer, 4 * 1024 * 1024)
+                writer.flush()
+                os.fsync(writer.fileno())
+        for temporary in sorted(path for path in staging.rglob("*") if path.is_file()):
+            relative = temporary.relative_to(staging)
+            published, checksum = publish_file(temporary, media / relative, verify)
+            extracted.append({"file": str(published.relative_to(media)), "bytes": published.stat().st_size, "sha256": checksum})
+        return extracted
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def mounted_destination(raw: str) -> Path:
@@ -53,23 +110,31 @@ def handle(message: dict) -> dict:
     downloads = Path(str(message.get("downloadRoot", "~/Downloads"))).expanduser().resolve()
     if not source.is_file() or (downloads not in source.parents and source.parent != downloads):
         raise ValueError(f"Il file restituito da Chrome non è sotto {downloads}")
-    target = unique_target(destination, source.name)
-    temporary = target.with_name(f".{target.name}.gphoto2mycloud-partial")
-    before = digest(source) if message.get("verify", True) else None
-    with source.open("rb") as reader, temporary.open("xb") as writer:
-        shutil.copyfileobj(reader, writer, 4 * 1024 * 1024)
-        writer.flush()
-        os.fsync(writer.fileno())
-    after = digest(temporary) if before else None
-    if before != after:
-        temporary.unlink(missing_ok=True)
-        raise OSError("Verifica SHA-256 fallita: il file sorgente non è stato rimosso")
-    os.replace(temporary, target)
+    folder = safe_relative(str(message.get("extractedFolder", "Media")))
+    media = destination / folder
+    media.mkdir(parents=True, exist_ok=True)
+    archive_hash = digest(source)
+    files = extract_download(source, media, bool(message.get("verify", True)))
+    photo_ids = list(dict.fromkeys(message.get("photoIds") or []))
+    if len(files) < len(photo_ids):
+        raise OSError(
+            f"Google ha restituito {len(files)} file per {len(photo_ids)} elementi: "
+            "il lotto non viene segnato come completato"
+        )
+    if message.get("keepArchives") and zipfile.is_zipfile(source):
+        archives = destination / "Archives"
+        archives.mkdir(exist_ok=True)
+        archive_target = unique_target(archives, source.name)
+        shutil.copy2(source, archive_target)
+        if digest(archive_target) != archive_hash:
+            archive_target.unlink(missing_ok=True)
+            raise OSError("Verifica SHA-256 dell'archivio fallita")
     source.unlink()
     receipt = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "file": target.name, "bytes": target.stat().st_size, "sha256": after,
-        "photoIds": list(dict.fromkeys(message.get("photoIds") or [])),
+        "archive": source.name, "archiveSha256": archive_hash,
+        "extractedFolder": str(folder), "fileCount": len(files), "files": files,
+        "photoIds": photo_ids,
     }
     with (destination / ".gphoto2mycloud-history.jsonl").open("a", encoding="utf-8") as log:
         log.write(json.dumps(receipt, ensure_ascii=False) + "\n")

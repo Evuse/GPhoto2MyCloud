@@ -1,9 +1,9 @@
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+import zipfile
 
-from native_host import digest, handle, unique_target
+from native_host import digest, extract_download, handle, safe_relative, unique_target
 
 
 class NativeHostTests(unittest.TestCase):
@@ -18,6 +18,25 @@ class NativeHostTests(unittest.TestCase):
     def test_status_rejects_unmounted_destination(self):
         with self.assertRaisesRegex(ValueError, "sotto /Volumes"):
             handle({"command": "status", "destination": "/tmp/photos"})
+
+    def test_extracts_zip_into_one_media_tree_and_deduplicates_identical_files(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            archive = root / "photos.zip"
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("Google Photos/2025/foto.jpg", b"original")
+                bundle.writestr("Google Photos/2025/video.mov", b"video")
+            media = root / "Media"
+            first = extract_download(archive, media, True)
+            second = extract_download(archive, media, True)
+            self.assertEqual(len(first), 2)
+            self.assertEqual(len(second), 2)
+            self.assertEqual(len(list(media.rglob("foto.jpg"))), 1)
+            self.assertEqual((media / "Google Photos/2025/foto.jpg").read_bytes(), b"original")
+
+    def test_rejects_zip_path_traversal(self):
+        with self.assertRaisesRegex(ValueError, "non sicuro"):
+            safe_relative("../../escape.jpg")
 
 
 if __name__ == "__main__":

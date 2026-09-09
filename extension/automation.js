@@ -11,6 +11,45 @@
     type: "progress", phase, message, processed: processed.size, discovered: observed.size, ...extra
   });
 
+  function timelineScroller() {
+    const tile = document.querySelector('a[href*="/photo/"]');
+    for (let node = tile?.parentElement; node && node !== document.body; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 50) return node;
+    }
+    const candidates = [...document.querySelectorAll("main, [role=main], div")]
+      .filter(node => node.clientHeight > innerHeight * 0.45 && node.scrollHeight > node.clientHeight + 100)
+      .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight));
+    return candidates[0] || document.scrollingElement;
+  }
+
+  function scrollPosition(scroller) {
+    return scroller === document.scrollingElement ? scrollY : scroller.scrollTop;
+  }
+
+  async function advanceTimeline(settings) {
+    const scroller = timelineScroller();
+    const before = scrollPosition(scroller);
+    const beforeHeight = scroller.scrollHeight;
+    const distance = Math.max(500, scroller.clientHeight * 0.8);
+    if (scroller === document.scrollingElement) scrollTo(0, before + distance);
+    else {
+      scroller.scrollTop = before + distance;
+      scroller.dispatchEvent(new Event("scroll", {bubbles: true}));
+    }
+    await sleep(settings.settleSeconds * 1000);
+    return scrollPosition(scroller) > before + 1 || scroller.scrollHeight > beforeHeight;
+  }
+
+  function rewindTimeline() {
+    const scroller = timelineScroller();
+    if (scroller === document.scrollingElement) scrollTo(0, 0);
+    else {
+      scroller.scrollTop = 0;
+      scroller.dispatchEvent(new Event("scroll", {bubbles: true}));
+    }
+  }
+
   function visiblePhotoCheckboxes() {
     const result = new Map();
     for (const link of document.querySelectorAll('a[href*="/photo/"]')) {
@@ -46,10 +85,7 @@
         }
       }
       if (selected.length >= settings.batchSize) break;
-      const before = scrollY;
-      scrollBy({top: Math.max(500, innerHeight * 0.8), behavior: "instant"});
-      await sleep(settings.settleSeconds * 1000);
-      bottomChecks = Math.abs(scrollY - before) < 2 ? bottomChecks + 1 : 0;
+      bottomChecks = await advanceTimeline(settings) ? 0 : bottomChecks + 1;
     }
     return selected;
   }
@@ -84,7 +120,7 @@
     observed = new Set();
     processed = new Set((await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || []);
     const settings = GPhotoPlanner.clampSettings(rawSettings);
-    scrollTo({top: 0, behavior: "instant"});
+    rewindTimeline();
     await sleep(settings.settleSeconds * 1000);
     report("starting", `Scansione dall'inizio · ${processed.size} elementi già completati`);
     try {

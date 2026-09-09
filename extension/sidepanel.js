@@ -1,5 +1,5 @@
 "use strict";
-const ids = ["destination", "downloadRoot", "batchSize", "clickDelayMs", "settleSeconds", "verifyCopies"];
+const ids = ["destination", "extractedFolder", "downloadRoot", "batchSize", "clickDelayMs", "settleSeconds", "verifyCopies", "keepArchives"];
 const el = id => document.getElementById(id);
 const settings = () => GPhotoPlanner.clampSettings(Object.fromEntries(ids.map(id => [id, el(id).type === "checkbox" ? el(id).checked : el(id).value])));
 function log(message) { el("log").textContent = `${new Date().toLocaleTimeString()}  ${message}\n${el("log").textContent}`; }

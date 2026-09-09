@@ -58,6 +58,13 @@ montato via SMB (ad esempio `/Volumes/MyCloud`).
    `/Volumes/MyCloud/GooglePhotos` e premere **Verifica disco**.
 5. Premere **Avvia backup** e lasciare la scheda aperta.
 
+> Dopo ogni aggiornamento del progetto è necessario premere **Ricarica** sulla scheda
+> dell'estensione in `chrome://extensions`. Chrome mantiene in memoria la versione
+> precedentemente caricata: copiare i file non ricarica automaticamente un'estensione
+> unpacked. Il nuovo pannello mostra chiaramente `v2.1.0`, la pipeline in quattro fasi
+> e la sezione **04 · Diagnostica installazione**. Se questi elementi non compaiono,
+> Chrome sta ancora eseguendo i file vecchi.
+
 ### Posso usare il Mac nel frattempo?
 
 Sì. La scheda Google Foto **non deve essere quella attiva**: si possono usare altre

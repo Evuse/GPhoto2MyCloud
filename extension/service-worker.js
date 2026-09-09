@@ -11,6 +11,11 @@ async function setJob(job) {
   else await chrome.storage.session.remove("activeJob");
 }
 
+async function markCompleted(photoIds) {
+  const current = (await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || [];
+  await chrome.storage.local.set({completedPhotoIds: [...new Set([...current, ...photoIds])]});
+}
+
 function nativeMessage(payload) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendNativeMessage("it.gphoto2mycloud.host", payload, response => {
@@ -30,6 +35,21 @@ async function dispatchShiftD(tabId) {
     });
     await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
       type: "keyUp", key: "D", code: "KeyD", modifiers: 8, windowsVirtualKeyCode: 68
+    });
+  } finally {
+    await chrome.debugger.detach(target).catch(() => {});
+  }
+}
+
+async function dispatchEscape(tabId) {
+  const target = {tabId};
+  await chrome.debugger.attach(target, "1.3");
+  try {
+    await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+      type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27
+    });
+    await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+      type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27
     });
   } finally {
     await chrome.debugger.detach(target).catch(() => {});
@@ -60,8 +80,10 @@ chrome.downloads.onChanged.addListener(async delta => {
       const moved = await nativeMessage({
         command: "move", source: item.filename, destination: job.settings.destination,
         downloadRoot: job.settings.downloadRoot,
+        photoIds: job.photoIds,
         verify: job.settings.verifyCopies
       });
+      await markCompleted(job.photoIds);
       await setJob(null);
       await chrome.tabs.sendMessage(job.tabId, {type: "batchResult", ok: true, moved}).catch(() => {});
     } catch (error) {
@@ -80,12 +102,17 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     nativeMessage({command: "status", destination: message.destination}).then(respond, error => respond({ok: false, error: error.message}));
     return true;
   }
+  if (message.type === "clearSelection") {
+    if (!sender.tab?.id) { respond({ok: false}); return; }
+    dispatchEscape(sender.tab.id).then(() => respond({ok: true}), error => respond({ok: false, error: error.message}));
+    return true;
+  }
   if (message.type === "downloadBatch") {
     const tabId = sender.tab?.id;
     if (!tabId) { respond({ok: false, error: "Scheda Google Foto non disponibile"}); return; }
     getJob().then(async existing => {
       if (existing) throw new Error("Lotto già attivo");
-      await setJob({tabId, settings: message.settings, downloadId: null, startedAt: Date.now() - 1000});
+      await setJob({tabId, settings: message.settings, photoIds: message.photoIds, downloadId: null, startedAt: Date.now() - 1000});
       await dispatchShiftD(tabId);
       respond({ok: true});
     }).catch(async error => {

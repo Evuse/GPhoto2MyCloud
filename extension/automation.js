@@ -3,56 +3,60 @@
   let running = false;
   let stopped = false;
   let selected = [];
+  let processed = new Set();
+  let observed = new Set();
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const report = (phase, message, extra = {}) => chrome.runtime.sendMessage({type: "progress", phase, message, ...extra});
+  const report = (phase, message, extra = {}) => chrome.runtime.sendMessage({
+    type: "progress", phase, message, processed: processed.size, discovered: observed.size, ...extra
+  });
 
-  function photoCheckboxes() {
-    return [...document.querySelectorAll('[role="checkbox"]')].filter(node => {
-      if (node.getAttribute("aria-checked") === "true") return false;
-      const box = node.getBoundingClientRect();
-      if (box.width < 10 || box.height < 10 || box.bottom < 0 || box.top > innerHeight) return false;
-      // Photo checkboxes live inside a tile containing a /photo/ link. This deliberately
-      // excludes navigation and "select day" controls that could overrun a batch.
-      let parent = node;
-      for (let depth = 0; parent && depth < 7; depth += 1, parent = parent.parentElement) {
-        if (parent.querySelector?.('a[href*="/photo/"]')) return true;
+  function visiblePhotoCheckboxes() {
+    const result = new Map();
+    for (const link of document.querySelectorAll('a[href*="/photo/"]')) {
+      const id = GPhotoPlanner.photoId(link.href, location.href);
+      if (!id) continue;
+      observed.add(id);
+      let container = link;
+      let checkbox = null;
+      for (let depth = 0; container && depth < 8; depth += 1, container = container.parentElement) {
+        checkbox = container.querySelector?.('[role="checkbox"]');
+        if (checkbox) break;
       }
-      return false;
-    });
+      if (!checkbox || checkbox.getAttribute("aria-checked") === "true") continue;
+      const box = checkbox.getBoundingClientRect();
+      if (box.width < 10 || box.height < 10 || box.bottom < 0 || box.top > innerHeight) continue;
+      if (!processed.has(id)) result.set(id, {id, checkbox});
+    }
+    return [...result.values()];
   }
 
   async function selectBatch(settings) {
     selected = [];
-    let stagnant = 0;
-    while (!stopped && selected.length < settings.batchSize && stagnant < 8) {
-      const candidates = photoCheckboxes().filter(item => !item.dataset.gp2mcDone);
-      if (!candidates.length) {
-        stagnant += 1;
-        scrollBy({top: Math.max(500, innerHeight * 0.8), behavior: "smooth"});
-        await sleep(settings.settleSeconds * 1000);
-        continue;
-      }
-      stagnant = 0;
-      for (const checkbox of candidates) {
+    let bottomChecks = 0;
+    while (!stopped && selected.length < settings.batchSize && bottomChecks < 5) {
+      const candidates = visiblePhotoCheckboxes().filter(item => !selected.some(value => value.id === item.id));
+      for (const item of candidates) {
         if (selected.length >= settings.batchSize || stopped) break;
-        checkbox.click();
-        checkbox.dataset.gp2mcDone = "1";
-        selected.push(checkbox);
-        report("selecting", `Selezione ${selected.length}/${settings.batchSize}`, {selected: selected.length});
+        item.checkbox.click();
         await sleep(settings.clickDelayMs);
+        if (item.checkbox.getAttribute("aria-checked") === "true") {
+          selected.push(item);
+          report("selecting", `Selezionate ${selected.length}/${settings.batchSize} · ${processed.size} già archiviate`, {selected: selected.length});
+        }
       }
-      scrollBy({top: Math.max(400, innerHeight * 0.65), behavior: "smooth"});
+      if (selected.length >= settings.batchSize) break;
+      const before = scrollY;
+      scrollBy({top: Math.max(500, innerHeight * 0.8), behavior: "instant"});
       await sleep(settings.settleSeconds * 1000);
+      bottomChecks = Math.abs(scrollY - before) < 2 ? bottomChecks + 1 : 0;
     }
-    return selected.length;
+    return selected;
   }
 
   async function clearSelection() {
-    for (const checkbox of selected) {
-      if (checkbox.isConnected && checkbox.getAttribute("aria-checked") === "true") checkbox.click();
-      await sleep(50);
-    }
+    await chrome.runtime.sendMessage({type: "clearSelection"}).catch(() => {});
+    await sleep(300);
     selected = [];
   }
 
@@ -68,25 +72,36 @@
     });
   }
 
+  async function saveCompleted(items) {
+    items.forEach(item => processed.add(item.id));
+    await chrome.storage.local.set({completedPhotoIds: [...processed]});
+  }
+
   async function start(rawSettings) {
     if (running) return;
     running = true;
     stopped = false;
+    observed = new Set();
+    processed = new Set((await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || []);
     const settings = GPhotoPlanner.clampSettings(rawSettings);
-    report("starting", "Analisi della griglia Google Foto…");
+    scrollTo({top: 0, behavior: "instant"});
+    await sleep(settings.settleSeconds * 1000);
+    report("starting", `Scansione dall'inizio · ${processed.size} elementi già completati`);
     try {
       while (!stopped) {
-        const count = await selectBatch(settings);
-        if (!count) {
-          report("complete", "Nessun'altra foto trovata. Backup terminato.", {selected: 0});
+        const batch = await selectBatch(settings);
+        if (!batch.length) {
+          if (!observed.size) throw new Error("Nessuna tessera riconosciuta: la struttura di Google Foto potrebbe essere cambiata");
+          report("complete", `Scansione completa: ${processed.size} elementi archiviati, ${observed.size} identificativi verificati in questa scansione.`, {selected: 0});
           break;
         }
-        report("requesting-download", `Richiesta download di ${count} elementi…`, {selected: count});
+        report("requesting-download", `Download di ${batch.length} elementi…`, {selected: batch.length});
         const completion = waitForBatch();
-        const response = await chrome.runtime.sendMessage({type: "downloadBatch", count, settings});
+        const response = await chrome.runtime.sendMessage({type: "downloadBatch", count: batch.length, photoIds: batch.map(item => item.id), settings});
         if (!response?.ok) throw new Error(response?.error || "Download non avviato");
         await completion;
-        report("batch-complete", `Lotto di ${count} elementi verificato e copiato sul My Cloud.`, {selected: count});
+        await saveCompleted(batch);
+        report("batch-complete", `Lotto verificato sul My Cloud · totale ${processed.size}`, {selected: batch.length});
         await clearSelection();
       }
     } catch (error) {

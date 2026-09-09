@@ -69,6 +69,7 @@ def handle(message: dict) -> dict:
     receipt = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "file": target.name, "bytes": target.stat().st_size, "sha256": after,
+        "photoIds": list(dict.fromkeys(message.get("photoIds") or [])),
     }
     with (destination / ".gphoto2mycloud-history.jsonl").open("a", encoding="utf-8") as log:
         log.write(json.dumps(receipt, ensure_ascii=False) + "\n")

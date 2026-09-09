@@ -20,7 +20,15 @@
     return "downloading";
   }
 
-  const api = {clampSettings, downloadState};
+  function photoId(href, base = "https://photos.google.com/") {
+    try {
+      return new URL(href, base).pathname.match(/\/photo\/([^/?#]+)/)?.[1] || null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  const api = {clampSettings, downloadState, photoId};
   root.GPhotoPlanner = api;
   if (typeof module !== "undefined") module.exports = api;
 })(typeof globalThis === "undefined" ? this : globalThis);

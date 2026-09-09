@@ -35,6 +35,8 @@ Il pannello laterale di Chrome è la GUI macOS dell'app e mostra:
 - attivazione/disattivazione della verifica SHA-256;
 - comandi **Avvia backup** e **Interrompi**;
 - registro cronologico visibile durante l'intero processo.
+- conteggio degli identificativi scoperti e già trasferiti, con ripresa dopo un arresto;
+- comando esplicito per azzerare il registro e iniziare un backup completamente nuovo.
 
 Le preferenze restano nel profilo Chrome locale. Il pannello non chiede password e
 non copia cookie: opera esclusivamente nella scheda `photos.google.com` già aperta.
@@ -53,14 +55,23 @@ montato via SMB (ad esempio `/Volumes/MyCloud`).
    `/Volumes/MyCloud/GooglePhotos` e premere **Verifica disco**.
 5. Premere **Avvia backup** e lasciare la scheda aperta.
 
+### Posso usare il Mac nel frattempo?
+
+Sì. La scheda Google Foto **non deve essere quella attiva**: si possono usare altre
+schede e altre applicazioni. Non bisogna però interagire con quella specifica scheda,
+ricaricarla, chiuderla, minimizzare/chiudere completamente Chrome o mettere il Mac in
+stop. Chrome rallenta i timer delle schede in background, quindi la scansione può
+procedere più lentamente. L'invio ⇧D è diretto alla scheda corretta tramite il suo ID,
+non alla finestra che si sta usando.
+
 L'installazione manuale dell'estensione è un vincolo di sicurezza imposto da Chrome
 alle estensioni non pubblicate sul Chrome Web Store. Non sono necessarie API Google,
 OAuth aggiuntivo o configurazioni Google Cloud.
 
 ## Flusso e sicurezza dei dati
 
-1. Il content script considera esclusivamente checkbox appartenenti a tessere con
-   link `/photo/`, senza usare i checkbox di intere date.
+1. Il content script estrae l'identificativo stabile dal link `/photo/<id>`, deduplica
+   gli ID e considera esclusivamente checkbox appartenenti alle relative tessere.
 2. Seleziona lentamente fino alla dimensione del lotto configurata.
 3. Il service worker usa il protocollo Chrome DevTools per generare un evento ⇧D
    attendibile; Chrome mostra l'avviso standard mentre il debugger è collegato.
@@ -72,6 +83,8 @@ OAuth aggiuntivo o configurazioni Google Cloud.
 7. Non sovrascrive mai: in caso di omonimia aggiunge un numero progressivo.
 8. Registra nome, byte, data e SHA-256 in
    `.gphoto2mycloud-history.jsonl` sul My Cloud.
+9. Soltanto dopo la copia verificata registra gli ID del lotto nel profilo Chrome;
+   un riavvio riparte dall'inizio della griglia e salta esattamente quegli ID.
 
 Se il NAS viene disconnesso, l'hash non coincide o Chrome non avvia il download,
 l'operazione si ferma e il file originale in Download viene lasciato intatto.
@@ -105,5 +118,9 @@ python3 -m py_compile native-host/gphoto2mycloud_host.py
   tale e quale, evitando qualsiasi trasformazione.
 - La scansione dipende dalla struttura accessibile della griglia Google Foto. Se
   Google la modifica, l'app fallisce esplicitamente e il selettore va aggiornato.
+- Non è tecnicamente possibile confrontare gli ID trovati con un conteggio ufficiale
+  dell'account, perché Google non espone più quell'inventario alle app. La schermata
+  finale certifica ciò che la griglia web ha mostrato e ciò che è stato copiato, non
+  un totale indipendente fornito da Google.
 - Per minimizzare throttling e blocchi anti-abuso, usare l'impostazione predefinita
   e non nascondere o sospendere Chrome durante il processo.

@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "GPhoto2MyCloud",
+  "version": "3.4.0",
+  "description": "Scarica Google Foto dall'interfaccia web e trasferisce i file su My Cloud.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2A7gyxeSakv7Jnb8nd/MeoVNwpko+7UMWjPjrtwyKKeP9E8Pzxbez4ykshJR9gqAHpfBr24OnN5v5M11n8I88nLsBp6RvmALeWQDX4o3lLE6+ILucrsgzGpnHHabT1tIbfUlW8jmK4FVC7ZUDRAeGEAOw53hwmAmo7czBiI+E5TilwbmOUElfmOhwCk+JccFO7cClgAYBAc70/y6cK6n3CB7zPDYG2BLph/H6rySki4ol3wi0yALxtrNU5bFgzXkaz2zZjsFdDEN5ai65MCPK21Pshzj/OnRT9FiMUGXIdM8WYBhkrkzGR+iDn28OWwZVVptPcdVmNTPRtIviCX7NwIDAQAB",
+  "permissions": ["activeTab", "alarms", "debugger", "downloads", "nativeMessaging", "sidePanel", "storage", "tabs"],
+  "host_permissions": ["https://photos.google.com/*"],
+  "background": {"service_worker": "service-worker.js"},
+  "action": {"default_title": "Apri GPhoto2MyCloud 3.4 Resilient"},
+  "side_panel": {"default_path": "sidepanel.html"},
+  "content_scripts": [{
+    "matches": ["https://photos.google.com/*"],
+    "js": ["planner.js", "automation.js"],
+    "run_at": "document_idle"
+  }]
+}

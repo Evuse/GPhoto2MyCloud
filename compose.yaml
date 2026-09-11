@@ -1,0 +1,14 @@
+services:
+  gphoto2mycloud:
+    build: .
+    restart: unless-stopped
+    environment:
+      RCLONE_CONFIG: /config/rclone/rclone.conf
+    volumes:
+      - ./config.toml:/config/config.toml:ro
+      - ${HOME}/.config/rclone:/config/rclone:ro
+      - state:/var/lib/gphoto2mycloud
+      - ${MYCLOUD_PATH:?set MYCLOUD_PATH}:/mnt/mycloud
+
+volumes:
+  state:

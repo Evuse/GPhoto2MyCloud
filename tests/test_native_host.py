@@ -96,6 +96,18 @@ class NativeHostTests(unittest.TestCase):
             self.assertEqual(second["lastPhotoId"], "photo-3")
             self.assertTrue(second["eof"])
 
+    def test_checkpoint_returns_latest_persisted_timeline_anchor(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            history = root / ".gphoto2mycloud-history.jsonl"
+            history.write_text("\n".join((
+                json.dumps({"photoIds":["photo-1"], "resumeAnchor":{"scrollTop":1200, "ratio":0.1}}),
+                json.dumps({"photoIds":["photo-2"], "resumeAnchor":{"scrollTop":987654, "ratio":0.7}}),
+            )) + "\n")
+            checkpoint = checkpoint_page(root)
+            self.assertEqual(checkpoint["lastPhotoId"], "photo-2")
+            self.assertEqual(checkpoint["resumeAnchor"]["scrollTop"], 987654)
+
     def test_rejects_zip_path_traversal(self):
         with self.assertRaisesRegex(ValueError, "non sicuro"):
             safe_relative("../../escape.jpg")

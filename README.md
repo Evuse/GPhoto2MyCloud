@@ -66,7 +66,7 @@ L'installer crea anche `~/Applications/GPhoto2MyCloud.app`. Per le esecuzioni fu
 avviare questa app: riapre Chrome con le opzioni necessarie a impedire la sospensione
 della timeline quando si lavora in un'altra scheda o applicazione.
 
-> La release resiliente mostra **v3.5.0** e **FINAL-PROD-3.5-NAS-CHECKPOINT**. L'installer non si limita più
+> La release resiliente mostra **v3.6.0** e **FINAL-PROD-3.6-INSTANT-ANCHOR**. L'installer non si limita più
 > a copiare il Native Host: installa l'intera estensione sotto
 > `~/Library/Application Support/GPhoto2MyCloud/extension-production`, aggiorna il
 > riferimento del profilo Chrome e riavvia Chrome con quella directory. Se compaiono
@@ -145,11 +145,19 @@ restituisce gli ID completati in pagine da 2.000 elementi, evitando i limiti di
 dimensione del Native Messaging. Il service worker unisce questi ID al registro locale
 e individua l'ultimo elemento archiviato.
 
-La timeline non viene quindi elaborata nuovamente dall'inizio: viene percorsa in
-modalità rapida, senza selezionare né scaricare, fino a trovare l'ultimo ID confermato
-dal NAS. La scansione operativa riparte immediatamente dopo quella tessera. Se la foto
-di checkpoint non esiste più su Google Foto, l'app usa il fallback sicuro dall'inizio,
-ma continua a saltare tutti gli ID già attestati dal My Cloud.
+Ogni ricevuta conserva anche un'ancora della timeline: posizione verticale assoluta,
+altezza complessiva della griglia, altezza della finestra e rapporto normalizzato. Al
+riavvio Chrome applica direttamente quella posizione con **un solo salto**, arretra di
+quattro schermate come margine di sicurezza e cerca localmente l'ultimo ID confermato.
+Non percorre più le 15.000 foto precedenti schermata per schermata. Il margine evita di
+saltare elementi se zoom o dimensioni della finestra sono cambiati.
+
+La prima esecuzione della 3.6 dopo l'aggiornamento non dispone ancora di un'ancora nelle
+vecchie ricevute: in quel solo caso usa innanzitutto la posizione corrente conservata
+dalla scheda Chrome e, se non basta, il vecchio recupero sicuro. Dal primo lotto
+completato dalla 3.6, l'ancora viene registrata sia sul NAS sia nello storage locale.
+Se l'ancora non è più compatibile o la foto è stata eliminata da Google Foto, resta
+disponibile il fallback dall'inizio per privilegiare la certezza di non perdere file.
 
 Se il NAS viene disconnesso, l'hash non coincide o l'estrazione fallisce, il tentativo
 corrente termina ma la sincronizzazione resta attiva e riprova con backoff. Lo ZIP

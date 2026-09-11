@@ -122,9 +122,10 @@ def preserve_incomplete_archive(source: Path, destination: Path, checksum: str) 
 def checkpoint_page(destination: Path, cursor: int = 0, limit: int = 2000) -> dict:
     history = destination / ".gphoto2mycloud-history.jsonl"
     if not history.is_file():
-        return {"ok": True, "photoIds": [], "cursor": 0, "eof": True, "lastPhotoId": None}
+        return {"ok": True, "photoIds": [], "cursor": 0, "eof": True, "lastPhotoId": None, "resumeAnchor": None}
     photo_ids: list[str] = []
     last_photo_id = None
+    resume_anchor = None
     with history.open("rb") as stream:
         stream.seek(max(0, cursor))
         while len(photo_ids) < limit:
@@ -139,9 +140,12 @@ def checkpoint_page(destination: Path, cursor: int = 0, limit: int = 2000) -> di
             photo_ids.extend(receipt_ids)
             if receipt_ids:
                 last_photo_id = receipt_ids[-1]
+            if isinstance(receipt.get("resumeAnchor"), dict):
+                resume_anchor = receipt["resumeAnchor"]
         next_cursor = stream.tell()
         eof = not stream.read(1)
-    return {"ok": True, "photoIds": photo_ids, "cursor": next_cursor, "eof": eof, "lastPhotoId": last_photo_id}
+    return {"ok": True, "photoIds": photo_ids, "cursor": next_cursor, "eof": eof,
+            "lastPhotoId": last_photo_id, "resumeAnchor": resume_anchor}
 
 
 def mounted_destination(raw: str) -> Path:
@@ -180,6 +184,8 @@ def handle(message: dict, progress=None) -> dict:
     media.mkdir(parents=True, exist_ok=True)
     archive_hash = digest(source)
     photo_ids = list(dict.fromkeys(message.get("photoIds") or []))
+    raw_anchor = message.get("resumeAnchor")
+    resume_anchor = raw_anchor if isinstance(raw_anchor, dict) else None
     if progress:
         progress({"phaseLabel":"Analisi archivio","message":"Lettura dello ZIP scaricato","percent":2,"current":0,"total":max(1, len(photo_ids)),"file":source.name})
     files = extract_download(source, media, bool(message.get("verify", True)), archive_hash, progress)
@@ -203,6 +209,7 @@ def handle(message: dict, progress=None) -> dict:
         "archive": source.name, "archiveSha256": archive_hash,
         "extractedFolder": str(folder), "fileCount": len(files), "files": files,
         "photoIds": photo_ids,
+        "resumeAnchor": resume_anchor,
     }
     with (destination / ".gphoto2mycloud-history.jsonl").open("a", encoding="utf-8") as log:
         log.write(json.dumps(receipt, ensure_ascii=False) + "\n")

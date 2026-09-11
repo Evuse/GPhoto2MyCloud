@@ -59,19 +59,25 @@ async function syncCheckpointFromNas(destination) {
   let cursor = 0;
   let eof = false;
   let lastPhotoId = null;
+  let resumeAnchor = null;
   const nasIds = new Set();
   while (!eof) {
     const page = await nativeMessage({command:"checkpoint", destination, cursor, limit:2000});
     for (const id of page.photoIds || []) nasIds.add(id);
     if (page.lastPhotoId) lastPhotoId = page.lastPhotoId;
+    if (page.resumeAnchor) resumeAnchor = page.resumeAnchor;
     if (!page.eof && page.cursor === cursor) throw new Error("Checkpoint My Cloud non avanza");
     cursor = page.cursor;
     eof = page.eof;
   }
   const local = (await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || [];
   const completedPhotoIds = [...new Set([...local, ...nasIds])];
-  await chrome.storage.local.set({completedPhotoIds, nasResumePhotoId:lastPhotoId});
-  return {ok:true, completedCount:completedPhotoIds.length, nasCount:nasIds.size, lastPhotoId};
+  const localState = await chrome.storage.local.get("resumeAnchor");
+  // Un'ancora locale è valida solo se descrive lo stesso ultimo ID attestato dal NAS.
+  // Evita di saltare foto quando il registro è avanzato da un altro profilo/Mac.
+  if (!resumeAnchor && localState.resumeAnchor?.photoId === lastPhotoId) resumeAnchor = localState.resumeAnchor;
+  await chrome.storage.local.set({completedPhotoIds, nasResumePhotoId:lastPhotoId, ...(resumeAnchor ? {resumeAnchor} : {})});
+  return {ok:true, completedCount:completedPhotoIds.length, nasCount:nasIds.size, lastPhotoId, resumeAnchor};
 }
 
 async function ensureDebugger(tabId) {
@@ -147,9 +153,11 @@ chrome.downloads.onChanged.addListener(async delta => {
         extractedFolder: job.settings.extractedFolder,
         keepArchives: job.settings.keepArchives,
         photoIds: job.photoIds,
+        resumeAnchor: job.resumeAnchor,
         verify: job.settings.verifyCopies
       });
       await markCompleted(job.photoIds);
+      if (job.resumeAnchor) await chrome.storage.local.set({resumeAnchor:job.resumeAnchor});
       await setJob(null);
       await chrome.tabs.sendMessage(job.tabId, {type: "batchResult", ok: true, moved}).catch(() => {});
     } catch (error) {
@@ -269,7 +277,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       if (existing) throw new Error("Lotto già attivo");
       const prepared = await nativeMessage({command: "prepare", destination: message.settings.destination, downloadRoot: message.settings.downloadRoot});
       chrome.runtime.sendMessage({type:"progress-ui",phase:"requesting-download",phaseLabel:"Download locale pronto",message:"Chrome salverà temporaneamente lo ZIP sul Mac",processPercent:28,batchPercent:100,batchLabel:"Destinazione pronta",detail:`Cartella attesa: ${prepared.downloadPath}`}).catch(()=>{});
-      await setJob({tabId, settings: message.settings, photoIds: message.photoIds, downloadPath: prepared.downloadPath, downloadId: null, startedAt: Date.now() - 1000});
+      await setJob({tabId, settings: message.settings, photoIds: message.photoIds, resumeAnchor:message.resumeAnchor, downloadPath: prepared.downloadPath, downloadId: null, startedAt: Date.now() - 1000});
       chrome.alarms.create("gphoto-download-watchdog", {delayInMinutes: message.settings.downloadTimeoutMinutes});
       await dispatchShiftD(tabId);
       respond({ok: true});

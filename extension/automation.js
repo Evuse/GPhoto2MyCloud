@@ -52,13 +52,50 @@
     }
   }
 
-  async function seekResumePoint(lastPhotoId, settings) {
-    rewindTimeline();
+  function captureResumeAnchor(lastPhotoId = null) {
+    const scroller = timelineScroller();
+    const top = scrollPosition(scroller);
+    return {
+      version: 1,
+      photoId: lastPhotoId,
+      scrollTop: Math.max(0, Math.round(top)),
+      scrollHeight: Math.max(1, Math.round(scroller.scrollHeight)),
+      viewportHeight: Math.max(1, Math.round(scroller.clientHeight || innerHeight)),
+      ratio: Math.max(0, Math.min(1, top / Math.max(1, scroller.scrollHeight - (scroller.clientHeight || innerHeight))))
+    };
+  }
+
+  async function restoreResumeAnchor(anchor, settings) {
+    if (!anchor || !Number.isFinite(Number(anchor.scrollTop))) return false;
+    const scroller = timelineScroller();
+    const currentHeight = Math.max(1, scroller.scrollHeight);
+    const oldHeight = Math.max(1, Number(anchor.scrollHeight));
+    const comparableLayout = Math.abs(currentHeight - oldHeight) / oldHeight < 0.12;
+    const rawTarget = comparableLayout
+      ? Number(anchor.scrollTop)
+      : Number(anchor.ratio || 0) * Math.max(0, currentHeight - (scroller.clientHeight || innerHeight));
+    // Riparti qualche schermata prima del checkpoint: è immediato, ma evita di
+    // saltare elementi se Chrome, zoom o la griglia hanno cambiato geometria.
+    const safetyMargin = Math.max(Number(anchor.viewportHeight) || innerHeight, scroller.clientHeight || innerHeight) * 4;
+    const target = Math.max(0, rawTarget - safetyMargin);
+    if (scroller === document.scrollingElement) scrollTo(0, target);
+    else { scroller.scrollTop = target; scroller.dispatchEvent(new Event("scroll", {bubbles:true})); }
+    await sleep(Math.min(3, settings.settleSeconds) * 1000);
+    report("resuming", "Posizione salvata sul My Cloud ripristinata", {phaseLabel:"Salto immediato al checkpoint",processPercent:7,batchPercent:0,detail:`${Math.round(target)} px · margine di sicurezza 4 schermate`});
+    return true;
+  }
+
+  async function seekResumePoint(lastPhotoId, settings, resumeAnchor = null) {
+    // Prima prova la posizione corrente (utile durante aggiornamenti e retry), poi
+    // effettua un singolo salto al punto persistito. Non scorre più dalla prima foto.
+    const visibleNow = [...document.querySelectorAll('a[href*="/photo/"]')]
+      .some(item => GPhotoPlanner.photoId(item.href, location.href) === lastPhotoId);
+    if (!visibleNow && resumeAnchor) await restoreResumeAnchor(resumeAnchor, settings);
     if (!lastPhotoId) return false;
     await sleep(Math.min(3, settings.settleSeconds) * 1000);
     let bottomChecks = 0;
     let screens = 0;
-    while (!stopped && bottomChecks < 4) {
+    while (!stopped && bottomChecks < 4 && screens < 12) {
       const link = [...document.querySelectorAll('a[href*="/photo/"]')]
         .find(item => GPhotoPlanner.photoId(item.href, location.href) === lastPhotoId);
       if (link) {
@@ -79,7 +116,7 @@
       if (screens % 10 === 0) report("resuming", "Ricerca del checkpoint sul My Cloud", {phaseLabel:"Avanzamento rapido",processPercent:5,batchPercent:0,detail:`${screens} schermate saltate · cerco ${lastPhotoId}`});
     }
     rewindTimeline();
-    report("recovering", "Checkpoint non più visibile: scansione sicura dall'inizio", {phaseLabel:"Fallback checkpoint",processPercent:3,batchPercent:0,detail:`Gli ID completati saranno comunque saltati: ${lastPhotoId}`});
+    report("recovering", "Checkpoint non visibile vicino alla posizione salvata", {phaseLabel:"Fallback sicuro",processPercent:3,batchPercent:0,detail:"Geometria della griglia cambiata: scansione dall'inizio per non saltare elementi"});
     return false;
   }
 
@@ -191,7 +228,7 @@
       const checkpoint = await chrome.runtime.sendMessage({type:"syncCheckpoint",destination:settings.destination});
       if (!checkpoint?.ok) throw new Error(checkpoint?.error || "Checkpoint My Cloud non disponibile");
       processed = new Set((await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || []);
-      const resumed = await seekResumePoint(checkpoint.lastPhotoId, settings);
+      const resumed = await seekResumePoint(checkpoint.lastPhotoId, settings, checkpoint.resumeAnchor);
       if (!resumed) await sleep(settings.settleSeconds * 1000);
       report("starting", resumed ? "Ripresa dopo l'ultimo elemento archiviato" : "Scansione della timeline dall'inizio", {phaseLabel:"Preparazione completata",batchPercent:0,batchLabel:"Lotto non ancora iniziato",detail:`My Cloud: ${checkpoint.nasCount} ID · registro unificato: ${processed.size} · modalità background attiva`});
       let effectiveBatchSize = settings.batchSize;
@@ -209,7 +246,8 @@
           }
           report("requesting-download", `Richiesta ZIP per ${batch.length} elementi`, {selected:batch.length,batchPercent:100,phaseLabel:"Avvio download",detail:`Tentativo con lotto ${effectiveBatchSize} · ID da ${batch[0].id} a ${batch.at(-1).id}`});
           const completion = waitForBatch();
-          const response = await chrome.runtime.sendMessage({type: "downloadBatch", count: batch.length, photoIds: batch.map(item => item.id), settings});
+          const resumeAnchor = captureResumeAnchor(batch.at(-1)?.id);
+          const response = await chrome.runtime.sendMessage({type: "downloadBatch", count: batch.length, photoIds: batch.map(item => item.id), resumeAnchor, settings});
           if (!response?.ok) throw new Error(response?.error || "Download non avviato");
           await completion;
           await saveCompleted(batch);
@@ -235,7 +273,7 @@
           const latest = await chrome.runtime.sendMessage({type:"syncCheckpoint",destination:settings.destination}).catch(() => null);
           if (latest?.ok) {
             processed = new Set((await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || []);
-            await seekResumePoint(latest.lastPhotoId, settings);
+            await seekResumePoint(latest.lastPhotoId, settings, latest.resumeAnchor);
           } else {
             rewindTimeline();
           }

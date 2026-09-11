@@ -9,7 +9,7 @@ ROOT = Path(__file__).parents[1]
 class ProjectIntegrityTests(unittest.TestCase):
     def test_manifest_references_current_ui_and_scripts(self):
         manifest = json.loads((ROOT / "extension/manifest.json").read_text())
-        self.assertEqual(manifest["version"], "3.5.0")
+        self.assertEqual(manifest["version"], "3.6.0")
         self.assertIn("scripting", manifest["permissions"])
         referenced = [manifest["side_panel"]["default_path"], manifest["background"]["service_worker"]]
         referenced.extend(manifest["content_scripts"][0]["js"])
@@ -31,8 +31,11 @@ class ProjectIntegrityTests(unittest.TestCase):
         self.assertIn("pingAutomation", worker)
         self.assertIn("syncCheckpointFromNas", worker)
         self.assertIn('command:"checkpoint"', worker)
+        self.assertIn("resumeAnchor", worker)
         automation = (ROOT / "extension/automation.js").read_text()
         self.assertIn("__gphoto2mycloudAutomationLoaded", automation)
+        self.assertIn("restoreResumeAnchor", automation)
+        self.assertIn("margine di sicurezza 4 schermate", automation)
 
     def test_installer_and_manifest_use_same_fixed_extension_id(self):
         installer = (ROOT / "macos/Installa.command").read_text()

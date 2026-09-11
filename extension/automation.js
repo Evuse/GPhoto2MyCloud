@@ -140,6 +140,52 @@
     return [...result.values()];
   }
 
+  function visibleTimelineEntries() {
+    const result = new Map();
+    for (const link of document.querySelectorAll('a[href*="/photo/"]')) {
+      const id = GPhotoPlanner.photoId(link.href, location.href);
+      if (!id || result.has(id)) continue;
+      observed.add(id);
+      let container = link;
+      let checkbox = null;
+      for (let depth = 0; container && depth < 8; depth += 1, container = container.parentElement) {
+        checkbox = container.querySelector?.('[role="checkbox"]');
+        if (checkbox) break;
+      }
+      if (!checkbox) continue;
+      const box = checkbox.getBoundingClientRect();
+      if (box.width >= 10 && box.height >= 10 && box.bottom >= 0 && box.top <= innerHeight) result.set(id, {id, checkbox});
+    }
+    return [...result.values()];
+  }
+
+  function newestVisiblePhotoId() {
+    return visibleTimelineEntries()[0]?.id || null;
+  }
+
+  async function selectNewPhotosBatch(settings, boundaryPhotoId, migrationProcessed) {
+    selected = [];
+    settingsForClickDelay = settings.clickDelayMs;
+    let bottomChecks = 0;
+    while (!stopped && selected.length < settings.batchSize && bottomChecks < 5) {
+      const entries = visibleTimelineEntries();
+      for (const item of entries) {
+        if (boundaryPhotoId && item.id === boundaryPhotoId) return {items:selected, boundaryReached:true};
+        if (migrationProcessed?.has(item.id)) return {items:selected, boundaryReached:true};
+        if (processed.has(item.id) || selected.some(value => value.id === item.id)) continue;
+        if (item.checkbox.getAttribute("aria-checked") !== "true") await trustedClick(item.checkbox);
+        if (item.checkbox.getAttribute("aria-checked") === "true") {
+          selected.push(item);
+          report("selecting", `Nuova foto ${selected.length} del lotto`, {phaseLabel:"Controllo nuove foto",selected:selected.length,batchPercent:selected.length/settings.batchSize*100,batchLabel:`Nuove: ${selected.length} / ${settings.batchSize}`,detail:`ID ${item.id} · controllo dalla testa della timeline`});
+        }
+        if (selected.length >= settings.batchSize) return {items:selected, boundaryReached:false};
+      }
+      const advanced = await advanceTimeline(settings);
+      bottomChecks = advanced ? 0 : bottomChecks + 1;
+    }
+    return {items:selected, boundaryReached:bottomChecks >= 5};
+  }
+
   async function trustedClick(checkbox) {
     const box = checkbox.getBoundingClientRect();
     const response = await chrome.runtime.sendMessage({
@@ -228,16 +274,33 @@
       const checkpoint = await chrome.runtime.sendMessage({type:"syncCheckpoint",destination:settings.destination});
       if (!checkpoint?.ok) throw new Error(checkpoint?.error || "Checkpoint My Cloud non disponibile");
       processed = new Set((await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || []);
-      const resumed = await seekResumePoint(checkpoint.lastPhotoId, settings, checkpoint.resumeAnchor);
-      if (!resumed) await sleep(settings.settleSeconds * 1000);
-      report("starting", resumed ? "Ripresa dopo l'ultimo elemento archiviato" : "Scansione della timeline dall'inizio", {phaseLabel:"Preparazione completata",batchPercent:0,batchLabel:"Lotto non ancora iniziato",detail:`My Cloud: ${checkpoint.nasCount} ID · registro unificato: ${processed.size} · modalità background attiva`});
+      rewindTimeline();
+      await sleep(Math.min(3, settings.settleSeconds) * 1000);
+      const newHeadPhotoId = newestVisiblePhotoId();
+      let checkingNewPhotos = Boolean(checkpoint.lastPhotoId && newHeadPhotoId);
+      let migrationProcessed = checkingNewPhotos && !checkpoint.headPhotoId ? new Set(processed) : null;
+      let resumed = false;
+      report("starting", checkingNewPhotos ? "Controllo delle nuove foto in cima alla timeline" : "Scansione della timeline dall'inizio", {phaseLabel:"Verifica nuovi caricamenti",batchPercent:0,batchLabel:"Lotto non ancora iniziato",detail:`Testa precedente: ${checkpoint.headPhotoId || "prima registrazione"} · My Cloud: ${checkpoint.nasCount} ID`});
       let effectiveBatchSize = settings.batchSize;
       let consecutiveFailures = 0;
       while (!stopped) {
         try {
           const attemptSettings = {...settings, batchSize: effectiveBatchSize};
-          const batch = await selectBatch(attemptSettings);
+          const headResult = checkingNewPhotos
+            ? await selectNewPhotosBatch(attemptSettings, checkpoint.headPhotoId, migrationProcessed)
+            : null;
+          const batch = headResult ? headResult.items : await selectBatch(attemptSettings);
           if (!batch.length) {
+            if (checkingNewPhotos && headResult.boundaryReached) {
+              const updated = await chrome.runtime.sendMessage({type:"updateCheckpointHead",destination:settings.destination,photoId:newHeadPhotoId});
+              if (!updated?.ok) throw new Error(updated?.error || "Impossibile salvare la testa della timeline");
+              checkingNewPhotos = false;
+              migrationProcessed = null;
+              observed = new Set();
+              resumed = await seekResumePoint(checkpoint.lastPhotoId, settings, checkpoint.resumeAnchor);
+              report("resuming", "Controllo nuove foto completato", {phaseLabel:"Ripresa archivio",processPercent:8,batchPercent:0,detail:resumed?"Salto al checkpoint completato":"Fallback sicuro attivato"});
+              continue;
+            }
             if (!observed.size) throw new Error("Nessuna tessera riconosciuta: la pagina non è ancora pronta");
             const unresolved = [...observed].filter(id => !processed.has(id));
             if (unresolved.length) throw new Error(`${unresolved.length} elementi individuati non sono stati selezionati`);
@@ -255,6 +318,14 @@
           const examples=(moved.files||[]).slice(0,3).map(file=>file.file).join(", ");
           report("batch-complete", `Estratti ${moved.fileCount||batch.length} file sul My Cloud`, {selected:batch.length,processPercent:100,batchPercent:100,phaseLabel:"Lotto completato",detail:`${processed.size} elementi registrati · cartella ${moved.extractedFolder||settings.extractedFolder}${examples?` · ${examples}`:""}`});
           await clearSelection();
+          if (checkingNewPhotos && headResult.boundaryReached) {
+            const updated = await chrome.runtime.sendMessage({type:"updateCheckpointHead",destination:settings.destination,photoId:newHeadPhotoId});
+            if (!updated?.ok) throw new Error(updated?.error || "Impossibile salvare la testa della timeline");
+            checkingNewPhotos = false;
+            migrationProcessed = null;
+            observed = new Set();
+            resumed = await seekResumePoint(checkpoint.lastPhotoId, settings, checkpoint.resumeAnchor);
+          }
           consecutiveFailures = 0;
           effectiveBatchSize = GPhotoPlanner.batchAfterSuccess(effectiveBatchSize, settings.batchSize);
         } catch (error) {
@@ -270,6 +341,11 @@
           await clearSelection();
           observed = new Set();
           await sleep(delay * 1000);
+          if (checkingNewPhotos) {
+            rewindTimeline();
+            await sleep(Math.min(3, settings.settleSeconds) * 1000);
+            continue;
+          }
           const latest = await chrome.runtime.sendMessage({type:"syncCheckpoint",destination:settings.destination}).catch(() => null);
           if (latest?.ok) {
             processed = new Set((await chrome.storage.local.get("completedPhotoIds")).completedPhotoIds || []);

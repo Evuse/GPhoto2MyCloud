@@ -60,12 +60,14 @@ async function syncCheckpointFromNas(destination) {
   let eof = false;
   let lastPhotoId = null;
   let resumeAnchor = null;
+  let headPhotoId = null;
   const nasIds = new Set();
   while (!eof) {
     const page = await nativeMessage({command:"checkpoint", destination, cursor, limit:2000});
     for (const id of page.photoIds || []) nasIds.add(id);
     if (page.lastPhotoId) lastPhotoId = page.lastPhotoId;
     if (page.resumeAnchor) resumeAnchor = page.resumeAnchor;
+    if (page.headPhotoId) headPhotoId = page.headPhotoId;
     if (!page.eof && page.cursor === cursor) throw new Error("Checkpoint My Cloud non avanza");
     cursor = page.cursor;
     eof = page.eof;
@@ -77,7 +79,7 @@ async function syncCheckpointFromNas(destination) {
   // Evita di saltare foto quando il registro è avanzato da un altro profilo/Mac.
   if (!resumeAnchor && localState.resumeAnchor?.photoId === lastPhotoId) resumeAnchor = localState.resumeAnchor;
   await chrome.storage.local.set({completedPhotoIds, nasResumePhotoId:lastPhotoId, ...(resumeAnchor ? {resumeAnchor} : {})});
-  return {ok:true, completedCount:completedPhotoIds.length, nasCount:nasIds.size, lastPhotoId, resumeAnchor};
+  return {ok:true, completedCount:completedPhotoIds.length, nasCount:nasIds.size, lastPhotoId, resumeAnchor, headPhotoId};
 }
 
 async function ensureDebugger(tabId) {
@@ -240,6 +242,17 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   }
   if (message.type === "syncCheckpoint") {
     syncCheckpointFromNas(message.destination).then(respond, error => respond({ok:false,error:error.message}));
+    return true;
+  }
+  if (message.type === "updateCheckpointHead") {
+    nativeMessage({command:"update_head", destination:message.destination, photoId:message.photoId}).then(respond, error => respond({ok:false,error:error.message}));
+    return true;
+  }
+  if (message.type === "resetCheckpoint") {
+    nativeMessage({command:"reset_checkpoint", destination:message.destination}).then(async result => {
+      await chrome.storage.local.remove(["completedPhotoIds", "resumeAnchor", "nasResumePhotoId"]);
+      respond(result);
+    }, error => respond({ok:false,error:error.message}));
     return true;
   }
   if (message.type === "ensureAutomationContent") {

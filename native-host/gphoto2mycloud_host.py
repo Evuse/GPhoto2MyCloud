@@ -148,6 +148,40 @@ def checkpoint_page(destination: Path, cursor: int = 0, limit: int = 2000) -> di
             "lastPhotoId": last_photo_id, "resumeAnchor": resume_anchor}
 
 
+def checkpoint_state(destination: Path) -> dict:
+    state = destination / ".gphoto2mycloud-state.json"
+    if not state.is_file():
+        return {"headPhotoId": None}
+    try:
+        payload = json.loads(state.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"headPhotoId": None}
+    return {"headPhotoId": str(payload["headPhotoId"]) if payload.get("headPhotoId") else None}
+
+
+def update_checkpoint_head(destination: Path, photo_id: str | None) -> dict:
+    target = destination / ".gphoto2mycloud-state.json"
+    temporary = target.with_suffix(f".tmp-{uuid.uuid4().hex}")
+    payload = {"headPhotoId": str(photo_id) if photo_id else None,
+               "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    os.replace(temporary, target)
+    return {"ok": True, **payload}
+
+
+def reset_checkpoint(destination: Path) -> dict:
+    archived = []
+    archive_dir = destination / "CheckpointArchives"
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    for source in (destination / ".gphoto2mycloud-history.jsonl", destination / ".gphoto2mycloud-state.json"):
+        if source.exists():
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            target = unique_target(archive_dir, f"{stamp}-{source.name.lstrip('.')}")
+            os.replace(source, target)
+            archived.append(str(target))
+    return {"ok": True, "archived": archived}
+
+
 def mounted_destination(raw: str) -> Path:
     destination = Path(raw).expanduser().resolve()
     if not str(destination).startswith("/Volumes/"):
@@ -167,7 +201,13 @@ def handle(message: dict, progress=None) -> dict:
         free = shutil.disk_usage(destination).free
         return {"ok": True, "freeBytes": free, "freeHuman": f"{free / 1024**3:.1f} GB"}
     if message.get("command") == "checkpoint":
-        return checkpoint_page(destination, int(message.get("cursor", 0)), int(message.get("limit", 2000)))
+        result = checkpoint_page(destination, int(message.get("cursor", 0)), int(message.get("limit", 2000)))
+        result.update(checkpoint_state(destination))
+        return result
+    if message.get("command") == "update_head":
+        return update_checkpoint_head(destination, message.get("photoId"))
+    if message.get("command") == "reset_checkpoint":
+        return reset_checkpoint(destination)
     if message.get("command") == "prepare":
         downloads = Path(str(message.get("downloadRoot", "~/Downloads"))).expanduser().resolve()
         if not downloads.is_dir() or not os.access(downloads, os.W_OK):

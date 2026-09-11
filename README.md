@@ -66,7 +66,7 @@ L'installer crea anche `~/Applications/GPhoto2MyCloud.app`. Per le esecuzioni fu
 avviare questa app: riapre Chrome con le opzioni necessarie a impedire la sospensione
 della timeline quando si lavora in un'altra scheda o applicazione.
 
-> La release resiliente mostra **v3.6.0** e **FINAL-PROD-3.6-INSTANT-ANCHOR**. L'installer non si limita più
+> La release resiliente mostra **v3.7.0** e **FINAL-PROD-3.7-HEAD-SCAN**. L'installer non si limita più
 > a copiare il Native Host: installa l'intera estensione sotto
 > `~/Library/Application Support/GPhoto2MyCloud/extension-production`, aggiorna il
 > riferimento del profilo Chrome e riavvia Chrome con quella directory. Se compaiono
@@ -152,12 +152,29 @@ quattro schermate come margine di sicurezza e cerca localmente l'ultimo ID confe
 Non percorre più le 15.000 foto precedenti schermata per schermata. Il margine evita di
 saltare elementi se zoom o dimensioni della finestra sono cambiati.
 
-La prima esecuzione della 3.6 dopo l'aggiornamento non dispone ancora di un'ancora nelle
+La prima esecuzione della 3.7 dopo l'aggiornamento non dispone ancora di un'ancora nelle
 vecchie ricevute: in quel solo caso usa innanzitutto la posizione corrente conservata
 dalla scheda Chrome e, se non basta, il vecchio recupero sicuro. Dal primo lotto
-completato dalla 3.6, l'ancora viene registrata sia sul NAS sia nello storage locale.
+completato dalla 3.7, l'ancora viene registrata sia sul NAS sia nello storage locale.
 Se l'ancora non è più compatibile o la foto è stata eliminata da Google Foto, resta
 disponibile il fallback dall'inizio per privilegiare la certezza di non perdere file.
+
+### Foto nuove e ripartenza volontaria da zero
+
+Prima di saltare all'ancora, la 3.7 torna per pochi istanti all'inizio della timeline e
+confronta la prima foto visibile con la **testa della raccolta** salvata sul My Cloud.
+Se trova nuovi elementi, li scarica in lotti fino a raggiungere la vecchia testa; solo
+dopo averli verificati aggiorna il riferimento sul NAS e salta all'ultimo checkpoint.
+Se il processo si interrompe durante questo controllo, la vecchia testa non viene
+spostata: al riavvio le foto già completate vengono saltate per ID e quelle rimaste
+vengono recuperate. Questo copre le nuove foto aggiunte dopo una sincronizzazione senza
+obbligare a ripercorrere tutta la raccolta.
+
+Il pulsante **Riparti da zero (azzera checkpoint sul NAS)** disattiva la ripartenza
+automatica, archivia cronologia e stato nella cartella `CheckpointArchives` del My
+Cloud e cancella gli ID locali. Al successivo Avvia la scansione parte realmente dalla
+prima foto. I media già presenti non vengono cancellati: saranno riscaricati per il
+test e riconosciuti tramite SHA-256 durante la pubblicazione, evitando copie identiche.
 
 Se il NAS viene disconnesso, l'hash non coincide o l'estrazione fallisce, il tentativo
 corrente termina ma la sincronizzazione resta attiva e riprova con backoff. Lo ZIP

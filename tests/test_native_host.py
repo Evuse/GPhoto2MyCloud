@@ -5,7 +5,7 @@ import unittest
 import zipfile
 from unittest.mock import patch
 
-from native_host import checkpoint_page, digest, extract_download, handle, preserve_incomplete_archive, safe_relative, unique_target
+from native_host import checkpoint_page, checkpoint_state, digest, extract_download, handle, preserve_incomplete_archive, reset_checkpoint, safe_relative, unique_target, update_checkpoint_head
 
 
 class NativeHostTests(unittest.TestCase):
@@ -107,6 +107,18 @@ class NativeHostTests(unittest.TestCase):
             checkpoint = checkpoint_page(root)
             self.assertEqual(checkpoint["lastPhotoId"], "photo-2")
             self.assertEqual(checkpoint["resumeAnchor"]["scrollTop"], 987654)
+
+    def test_head_checkpoint_is_atomic_and_reset_archives_state(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / ".gphoto2mycloud-history.jsonl").write_text('{"photoIds":["one"]}\n')
+            update_checkpoint_head(root, "newest-photo")
+            self.assertEqual(checkpoint_state(root)["headPhotoId"], "newest-photo")
+            result = reset_checkpoint(root)
+            self.assertEqual(len(result["archived"]), 2)
+            self.assertFalse((root / ".gphoto2mycloud-history.jsonl").exists())
+            self.assertFalse((root / ".gphoto2mycloud-state.json").exists())
+            self.assertEqual(len(list((root / "CheckpointArchives").iterdir())), 2)
 
     def test_rejects_zip_path_traversal(self):
         with self.assertRaisesRegex(ValueError, "non sicuro"):
